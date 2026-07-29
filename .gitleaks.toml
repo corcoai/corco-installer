@@ -1,0 +1,20 @@
+# Estate-wide gitleaks configuration, identical in every repository.
+#
+# Extends the default ruleset rather than replacing it: every upstream rule
+# stays active, and this file only records the false-positive classes that the
+# estate's own history and documentation produce. Keep it that way — an
+# allowlist is a claim that a match cannot be a credential, so each entry
+# states why.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "gcloud secrets list --project=<project>: the match is a GCP project name, not a credential. Secret Manager lists names, never values."
+regexTarget = "match"
+regexes = ['''secrets list --project=''']
+
+[[allowlists]]
+description = "Documentation placeholder in curl --user examples. The real Jira token was removed from history at split time and replaced with this literal; the rule fires on the user:token shape, not on a live value."
+regexTarget = "match"
+regexes = ['''your-api-token''']

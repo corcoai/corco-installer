@@ -1,0 +1,27 @@
+#!/bin/bash
+# Estate-wide pre-commit hook: refuse to commit a secret.
+#
+# Identical in every repository of the estate. Enable it once per clone with
+#   git config core.hooksPath .githooks
+#
+# CI runs the same scan, so this hook is a convenience rather than the control:
+# it moves the failure from "after the push" to "before the commit". It does not
+# skip when gitleaks is missing, because a check that silently disables itself
+# is worse than no check at all.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed." >&2
+  echo "  brew install gitleaks" >&2
+  echo "To commit without the scan, once: git commit --no-verify" >&2
+  exit 1
+fi
+
+if ! gitleaks git --pre-commit --staged --redact --no-banner --exit-code 1; then
+  echo >&2
+  echo "pre-commit: a staged change looks like a secret; the commit was refused." >&2
+  echo "If it is a false positive, add a gitleaks:allow comment on that line," >&2
+  echo "or allowlist the pattern in .gitleaks.toml. Do not use --no-verify to" >&2
+  echo "get a real credential past this." >&2
+  exit 1
+fi
