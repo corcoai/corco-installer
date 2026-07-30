@@ -1,0 +1,6 @@
+# The client bootstrap is engineering's; it provisions a customer's GCP project.
+* @corcoai/engineering
+
+# This repository is public and clients pull setup.sh live from the default branch,
+# then pipe it into a shell. Founder review, always.
+/setup.sh @benedikt-corco
