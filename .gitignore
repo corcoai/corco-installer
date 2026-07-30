@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+.DS_Store
+
+# Binaries
+*.so
+*.dylib
+
+# Linter cache
+.ruff_cache/

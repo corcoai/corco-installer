@@ -1361,12 +1361,10 @@ except Exception as e:
 # Get licensed tier from registry (already fetched in CLIENT_DATA)
 LICENSED_TIER=""
 LICENSED_LIMIT=0
-BILLING_STATUS=""
 
 if [ -n "$CLIENT_DATA" ] && [ "$CLIENT_DATA" != "null" ]; then
     LICENSED_TIER=$(echo "$CLIENT_DATA" | jq -r '.license.tier // "unknown"' 2>/dev/null || echo "unknown")
     LICENSED_LIMIT=$(echo "$CLIENT_DATA" | jq -r '.license.user_limit // 0' 2>/dev/null || echo "0")
-    BILLING_STATUS=$(echo "$CLIENT_DATA" | jq -r '.license.billing_status // ""' 2>/dev/null || echo "")
 fi
 
 # Handle license display

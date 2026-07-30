@@ -24,9 +24,34 @@
 
 # Don't use set -e globally - we handle errors gracefully to ensure cleanup completes
 
-# Source centralized path configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../config/config.sh"
+
+# Locate the platform tree. This script is the client-side bootstrap and does not ship
+# inside the release tarball, so it cannot source the tarball's deployment/config -
+# it has to resolve the paths itself. There is deliberately no empty fallback: an
+# unset TERRAFORM_DIR would turn "cd $TERRAFORM_DIR" into a no-op that runs terraform
+# destroy against whatever happens to be the current directory, and
+# "rm -rf $TERRAFORM_DIR/.terraform" into "rm -rf /.terraform".
+PLATFORM_ROOT="${CORCO_PLATFORM_ROOT:-}"
+if [ -z "$PLATFORM_ROOT" ]; then
+    if [ -d "$SCRIPT_DIR/corco-installer/deployment/terraform" ]; then
+        # Normal client layout: setup.sh extracts the release tarball alongside us.
+        PLATFORM_ROOT="$SCRIPT_DIR/corco-installer"
+    elif [ -d "$SCRIPT_DIR/deployment/terraform" ]; then
+        # Consultant running this from a full corco-platform checkout.
+        PLATFORM_ROOT="$SCRIPT_DIR"
+    else
+        # Nothing extracted yet. Keep the client path so every derived path stays
+        # absolute and non-empty; the terraform steps check before using it.
+        PLATFORM_ROOT="$SCRIPT_DIR/corco-installer"
+    fi
+fi
+
+TERRAFORM_DIR="$PLATFORM_ROOT/deployment/terraform"
+
+# Only present in a full checkout - the release tarball does not ship the registry.
+# Every use below is guarded by [ -f "$REGISTRY_FILE" ].
+REGISTRY_FILE="$PLATFORM_ROOT/deployment/registry.json"
 
 # Corco callback endpoint
 TEARDOWN_CALLBACK_URL="${TEARDOWN_CALLBACK_URL:-https://setup.corco.ai/api/teardown}"
@@ -234,7 +259,7 @@ DATASET=""
 WORKSPACE_ADMIN=""
 
 if [ -n "$PROJECT_ID" ]; then
-    # Project ID provided via --project flag — skip all derivation
+    # Project ID provided via --project flag - skip all derivation
     REGION="${REGION:-us-central1}"
     echo "Using provided project ID: $PROJECT_ID"
 elif [ "$TFVARS_EXISTS" == "true" ]; then
@@ -282,7 +307,7 @@ if [ -z "$PROJECT_ID" ]; then
         log_warning "Derived project ID from domain: $PROJECT_ID"
     else
         log_warning "Could not determine project ID - will only clean up local files"
-        echo "  No tfvars file, no registry entry, and no project matching $BASE_ID[-N] found."
+        echo "  No tfvars file, no registry entry, and no project matching ${BASE_ID}[-N] found."
         echo "  Skipping GCP resource deletion."
     fi
 fi
@@ -347,7 +372,7 @@ log_step "Verifying Authentication"
 # Determine if running in Cloud Shell or locally
 if [ -n "$CLOUD_SHELL" ] || [ -n "$GOOGLE_CLOUD_SHELL" ]; then
     # Cloud Shell: already authenticated as the user. Do NOT activate
-    # configurations or change accounts — this corrupts Cloud Shell auth.
+    # configurations or change accounts - this corrupts Cloud Shell auth.
     echo "Running in Cloud Shell - using existing authentication"
     if [ -n "$PROJECT_ID" ]; then
         gcloud config set project "$PROJECT_ID" --quiet
@@ -401,7 +426,7 @@ fi
 # Notify Corco: Teardown Started
 # -----------------------------------------------------------------------------
 
-# Notify Corco (silent — don't show internal callback status to user)
+# Notify Corco (silent - don't show internal callback status to user)
 DEPLOYER=$(gcloud config get-value account 2>/dev/null || echo "unknown")
 if command -v curl &> /dev/null; then
     curl -s -X POST "$TEARDOWN_CALLBACK_URL/start" \
@@ -428,7 +453,7 @@ if [ -z "$PROJECT_ID" ]; then
     log_warning "No project ID - skipping GCP resource deletion"
 elif [ "$KEEP_PROJECT" == "true" ]; then
     # For --keep-project, we know the project exists (setup just detected it).
-    # Don't test with gcloud projects describe — Cloud Shell auth can be flaky.
+    # Don't test with gcloud projects describe - Cloud Shell auth can be flaky.
     # Set the project explicitly and proceed.
     PROJECT_EXISTS="true"
     gcloud config set project "$PROJECT_ID" --quiet 2>/dev/null || true
@@ -592,7 +617,7 @@ if [ "$KEEP_PROJECT" == "true" ] && [ "$PROJECT_EXISTS" == "true" ]; then
         echo "  [4/7] Secrets: preserved (no --delete-secrets)"
     fi
     
-    # 5. Delete GCS buckets (preserve tfstate — Terraform needs it on reinstall)
+    # 5. Delete GCS buckets (preserve tfstate - Terraform needs it on reinstall)
     echo "  [5/7] GCS buckets..."
     for bucket in "${PROJECT_ID}-recordings" "${PROJECT_ID}-voice" "${PROJECT_ID}-function-source"; do
         if gsutil ls -b "gs://${bucket}" &>/dev/null 2>&1; then
@@ -603,7 +628,7 @@ if [ "$KEEP_PROJECT" == "true" ] && [ "$PROJECT_EXISTS" == "true" ]; then
     done
     TFSTATE_BUCKET="${PROJECT_ID}-tfstate"
     if gsutil ls -b "gs://${TFSTATE_BUCKET}" &>/dev/null 2>&1; then
-        echo "    Preserved: gs://${TFSTATE_BUCKET} (Terraform state — needed for idempotent reinstall)"
+        echo "    Preserved: gs://${TFSTATE_BUCKET} (Terraform state - needed for idempotent reinstall)"
     fi
     log_success "GCS buckets cleaned (tfstate preserved)"
     
@@ -620,7 +645,7 @@ if [ "$KEEP_PROJECT" == "true" ] && [ "$PROJECT_EXISTS" == "true" ]; then
         echo "  [6/7] BigQuery: preserved (no --delete-data)"
     fi
     
-    # 7. Service accounts — PRESERVED
+    # 7. Service accounts - PRESERVED
     # SAs are kept because:
     #   - DWD configuration in Google Workspace Admin references the SA's uniqueId
     #   - Deleting the SA invalidates DWD (requires manual re-configuration)
@@ -707,9 +732,13 @@ else
     if [ "$PROJECT_EXISTS" == "false" ]; then
         echo "Project doesn't exist - skipping Terraform destroy."
         echo "Resources were likely already deleted."
+    elif ! cd "$TERRAFORM_DIR" 2>/dev/null; then
+        # Never fall through to running terraform in whatever the current directory is.
+        log_error "Terraform directory not found: $TERRAFORM_DIR"
+        echo "  Re-run the installer to extract the platform files, or set"
+        echo "  CORCO_PLATFORM_ROOT to the directory containing deployment/terraform."
+        echo "  Skipping Terraform destroy; nothing was changed."
     else
-        cd "$TERRAFORM_DIR"
-        
         # Initialize Terraform with correct backend config
         echo "Initializing Terraform..."
         TFSTATE_BUCKET="${PROJECT_ID}-tfstate"
