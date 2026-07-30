@@ -1662,7 +1662,7 @@ workspace_domain      = "$DOMAIN"
 workspace_admin_email = "$ADMIN_EMAIL"
 
 bigquery_dataset  = "corporate_context"
-bigquery_location = "EU"
+bigquery_location = "US"
 
 gcs_bucket_prefix = "${SAFE_DOMAIN}-ingestion"
 

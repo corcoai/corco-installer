@@ -10,7 +10,7 @@
 # SHA-256 the setup service publishes before extracting anything. A missing or
 # mismatched checksum aborts the install. That makes the deployment order
 # mandatory: the setup-landing function must be serving checksums, and a
-# release built by corco-release must be in gs://corco-dist, BEFORE this file
+# release built by corco-release must be in gs://corco-prod-dist, BEFORE this file
 # is pushed here -- clients pull it live from the default branch.
 # ============================================================================
 
