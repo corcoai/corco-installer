@@ -1,6 +1,5 @@
 # Teardown Tutorial
 
-
 ## Table of Contents
 
 <nav class="toc">
@@ -17,11 +16,13 @@
 
 ---
 
-This file should be placed at the root of the corco-installer repository as `TEARDOWN.md`.
-
-Cloud Shell will display this as an interactive tutorial when users click the teardown link.
-
----
+<!--
+Publishing note, deliberately a comment: this document is what the customer reads,
+so it must contain nothing addressed to us. Copy this file to the root of the
+corco-installer repository as TEARDOWN.md; Cloud Shell renders it as the
+interactive tutorial behind the teardown link, and the copy in that public repo is
+the one customers actually open.
+-->
 
 ## 1. Teardown Your AI Ingestion Deployment
 
