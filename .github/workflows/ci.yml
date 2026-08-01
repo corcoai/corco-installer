@@ -17,10 +17,22 @@
 # the bootstrap, teardown.sh, and the installer under deployment/scripts/ that
 # the bootstrap hands over to.
 #
-# The second job, doc-links, is the estate's documentation check. Its checker is
-# not in this repository -- it comes from corco-tools as a composite action,
-# which is the one way to reach across a repository boundary without a
-# long-lived credential.
+# The estate's other repositories also run a doc-links job, which resolves
+# Markdown links against the two link conventions using a checker that lives in
+# corco-tools and arrives as a composite action. This repository cannot: it is
+# the one public repository in the estate, and GitHub allows access to a private
+# repository's actions "only from private repositories". The job was added here
+# and failed at Set up job with "Unable to resolve action 'corcoai/corco-tools',
+# not found" -- before any step, with the organization Actions access setting
+# already correct and identical calls succeeding from the private repositories.
+# It is removed rather than left red, because a gate that cannot pass teaches
+# people to ignore red faster than one that fails honestly.
+#
+# The two tracked documents here are therefore checked by hand, by running
+# corco-docs-links against this checkout from a corco-tools working copy. Making
+# that automatic means either vendoring the checker into a public repository or
+# publishing it, and both are decisions about what this repository exposes
+# rather than about CI. SD-161 carries that decision.
 #
 # No credential of any kind, for the reason corco-platform gives: a pull request
 # job that holds one hands it to whatever a contributor chooses to push.
@@ -48,11 +60,6 @@ concurrency:
 env:
   SHELLCHECK_VERSION: 0.11.0
   SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
-  # Quoted, because YAML would read 3.12 as a number and a later 3.1 as the same
-  # thing. There is no Python in this repository at all; this is corco-tools'
-  # floor, for the doc-links check below, and nothing else here uses it. The line
-  # and the job it feeds are identical in every repository in the estate.
-  DOC_LINKS_PYTHON_VERSION: "3.12"
 
 jobs:
   shellcheck:
@@ -95,31 +102,3 @@ jobs:
           fi
           echo "Checking $count scripts."
           git ls-files -z '*.sh' | xargs -0 ./shellcheck --severity=error
-
-  doc-links:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ env.DOC_LINKS_PYTHON_VERSION }}
-
-      - name: Resolve every documentation link
-        # The checker lives in corco-tools and the documents live here, so this
-        # reaches across a repository boundary -- with an action rather than a
-        # credential, the same mechanism and the same organization Actions
-        # access setting that corco-platform's release workflow depends on.
-        #
-        # It runs in a single-repository checkout, which is the point rather
-        # than a limitation: a cross-repository link's ../ count is a property
-        # of where the file sits, so a depth error is provable without the
-        # sibling being present. Sixteen links across nine documents in the
-        # estate were wrong in exactly that way and not one looked wrong.
-        #
-        # Strict by default, so a same-repo relative link that resolves today
-        # still fails: it works from where the file is and breaks the moment the
-        # file moves, which is what the repo-absolute convention exists to
-        # prevent. Every repository was clean at that setting as of the commit
-        # that adds this, which is the condition for a gate arriving green.
-        uses: corcoai/corco-tools/.github/actions/doc-links@main
