@@ -13,9 +13,20 @@
 # pull it live from the default branch into Google Cloud Shell, so a syntax
 # error here is not a failed build -- it is a failed onboarding, in front of the
 # client, with no tarball or tag to roll back to. There is no Python here, so
-# shellcheck carries that whole weight, and it covers all three tracked scripts:
-# the bootstrap, teardown.sh, and the installer under deployment/scripts/ that
-# the bootstrap hands over to.
+# shellcheck carries that whole weight, over every tracked script.
+#
+# Two of those scripts are this repository's subject: setup.sh, the bootstrap,
+# and teardown.sh. The third, deployment/scripts/setup.sh, is neither. It is a
+# stale snapshot of corco-platform's script of that path -- it still names the
+# pre-split org benedikt-waganari and predates the project-reuse and project-id
+# length handling -- and the bootstrap does not run it. What the bootstrap runs
+# is corco-installer/deployment/scripts/setup.sh *inside the directory it just
+# extracted the tarball into*, which corco-tools packages out of corco-platform
+# and corco-platform's own CI gates. The paths coincide; the files do not. This
+# copy ships nowhere and is read by nothing, so gating it measures a file no
+# customer will ever execute while implying the real one is covered here. It is
+# to be deleted, which SD-160 carries; the enumeration below needs no change
+# when it goes, since it counts tracked scripts rather than naming them.
 #
 # The estate's other repositories also run a doc-links job, which resolves
 # Markdown links against the two link conventions using a checker that lives in
@@ -84,7 +95,7 @@ jobs:
           ./shellcheck --version
 
       - name: Check every tracked script
-        # --severity=error, matching corco-platform. The three scripts here are
+        # --severity=error, matching corco-platform. The scripts here are
         # clean at error and carry 11 findings at warning, and a gate has to be
         # green the day it arrives or it teaches people to ignore red. Raising
         # the floor is its own change with its own cleanup, and it is worth
