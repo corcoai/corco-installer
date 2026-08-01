@@ -1,0 +1,39 @@
+# Dependency updates: GitHub Actions only.
+#
+# Every third-party action in this repository is pinned to a full commit SHA,
+# because a tag is a movable label that whoever owns the action can repoint at
+# new code. The cost of that pin is that nothing announces a new release, so
+# Dependabot watches the actions and opens the bump with the SHA and its version
+# comment already correct. Without this file the pins are correct and frozen,
+# which is the failure mode that looks like success.
+#
+# This repository is public and holds the two files a client pipes into bash, so
+# the CI that checks them is the last thing that should be running an action
+# nobody has looked at in a year. There is no other ecosystem: setup.sh and
+# teardown.sh are POSIX shell with no vendored dependency, and the only thing
+# they fetch at runtime is the release tarball, which they verify against the
+# SHA-256 the setup service publishes rather than trusting the transport.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # `/` is the whole of what this ecosystem reads: the workflows under
+    # .github/workflows, plus an action.yml or action.yaml in the repository
+    # root. A composite action added under .github/actions/ would need the
+    # `directories` key, which unlike `directory` accepts a glob.
+    directory: "/"
+    schedule:
+      # Monday morning UTC, beside the weekly history sweep in secrets.yml, so
+      # that the repository's own maintenance arrives together rather than
+      # dribbling through the week. Same slot in every repository in the estate.
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    # One pull request for all of the actions rather than one each. They are
+    # updated for the same reason on the same day, and reviewing them as a group
+    # is how a reader sees that every SHA still carries a version comment.
+    groups:
+      actions:
+        patterns:
+          - "*"
