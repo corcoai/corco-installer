@@ -1,0 +1,87 @@
+# The pull request gate for the client bootstrap.
+#
+# Modelled on corco-platform/.github/workflows/ci.yml, which is the estate's
+# reference for what a gate looks like: a job per concern, so a red check names
+# its own cause; no continue-on-error and no `|| true` anywhere, because a gate
+# that can be ignored is documentation rather than a gate; and every tool
+# version pinned in the env block below rather than inherited from the runner
+# image, because a tool that updates itself moves the gate without anyone
+# deciding to.
+#
+# This repository has the shortest path from a commit to a customer of anything
+# in the estate, and no release step in between. setup.sh is public and clients
+# pull it live from the default branch into Google Cloud Shell, so a syntax
+# error here is not a failed build -- it is a failed onboarding, in front of the
+# client, with no tarball or tag to roll back to. There is no Python here, so
+# shellcheck is the whole of the gate and it covers all three tracked scripts:
+# the bootstrap, teardown.sh, and the installer under deployment/scripts/ that
+# the bootstrap hands over to.
+#
+# No credential of any kind, for the reason corco-platform gives: a pull request
+# job that holds one hands it to whatever a contributor chooses to push.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every version this workflow pins, in one place, so that a bump is one edit and
+# a reader can see the whole toolchain at once. Nothing below may name a version
+# directly; if a job needs one that is not here, add it here. The shellcheck pin
+# matches corco-platform's, so the estate is measured against one toolchain
+# rather than a different one per repository.
+env:
+  SHELLCHECK_VERSION: 0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install shellcheck
+        # A pinned release rather than the runner image's preinstalled copy,
+        # which moves with the image and would move the gate with it. Verified
+        # against a pinned checksum for the reason secrets.yml gives -- and with
+        # more force here than anywhere else in the estate, since this is the
+        # repository whose whole subject is not executing what you have not
+        # verified.
+        run: |
+          set -euo pipefail
+          curl -sSfL -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          mv "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" shellcheck
+          ./shellcheck --version
+
+      - name: Check every tracked script
+        # --severity=error, matching corco-platform. The three scripts here are
+        # clean at error and carry 11 findings at warning, and a gate has to be
+        # green the day it arrives or it teaches people to ignore red. Raising
+        # the floor is its own change with its own cleanup, and it is worth
+        # doing here first of anywhere.
+        #
+        # Tracked files, not a filesystem walk: CI gates what is committed. The
+        # empty check is what stops a layout change from silently checking
+        # nothing and reporting green.
+        run: |
+          set -euo pipefail
+          count="$(git ls-files '*.sh' | wc -l | tr -d ' ')"
+          if [ "$count" -eq 0 ]; then
+            echo "Enumerated no shell scripts, which cannot be right."
+            exit 1
+          fi
+          echo "Checking $count scripts."
+          git ls-files -z '*.sh' | xargs -0 ./shellcheck --severity=error
