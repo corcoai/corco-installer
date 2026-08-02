@@ -4,12 +4,14 @@
 
 ## Run Setup
 
-Copy the command below, paste it in the terminal, and press **Enter**:
+Copy the **setup command** from your setup page, paste it in the terminal, and press
+**Enter**. It already contains your setup token.
+
+If you would rather not go back to that page, run the script on its own and it will ask
+for the token:
 
 ```sh
 ./setup.sh
 ```
 
-When prompted, paste your **setup token** from the landing page.
-
-The script will automatically detect your domain and configure everything.
+Either way the script detects your domain and configures everything from there.
