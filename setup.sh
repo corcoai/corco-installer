@@ -51,12 +51,19 @@ echo ""
 # the verified installer from the downloaded package; arbitrary arguments are not.
 parse_bootstrap_arguments() {
     TOKEN=""
-    FORWARD_REUSE_SAVED="false"
+    FORWARD_SETUP_ARGUMENTS=()
     for argument in "$@"; do
         case $argument in
             --token=*) TOKEN="${argument#*=}" ;;
-            --reuse-saved) FORWARD_REUSE_SAVED="true" ;;
-            *) ;;
+            --resume|--reuse-saved|--upgrade) FORWARD_SETUP_ARGUMENTS+=("$argument") ;;
+            --approve-destructive-plan=*) FORWARD_SETUP_ARGUMENTS+=("$argument") ;;
+            --allow-destructive-plan=*)
+                FORWARD_SETUP_ARGUMENTS+=("--approve-destructive-plan=${argument#*=}")
+                ;;
+            *)
+                echo -e "${RED}Error: unknown bootstrap argument: $argument${NC}" >&2
+                return 1
+                ;;
         esac
     done
 }
@@ -68,16 +75,27 @@ launch_main_setup() {
         --domain="$DOMAIN"
         --consultant="$CONSULTANT"
     )
-    if [ "$FORWARD_REUSE_SAVED" == "true" ]; then
-        if ! grep -Eq '^[[:space:]]*--reuse-saved\)' "$setup_script"; then
-            echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support --reuse-saved.${NC}"
-            echo "Wait for the saved-answer release to be promoted, then run the same command again."
-            return 1
-        fi
-        "$setup_script" "${setup_arguments[@]}" --reuse-saved
-    else
-        "$setup_script" "${setup_arguments[@]}"
+    local forwarded
+    if [ "${#FORWARD_SETUP_ARGUMENTS[@]}" -gt 0 ]; then
+        for forwarded in "${FORWARD_SETUP_ARGUMENTS[@]}"; do
+            case "$forwarded" in
+                --approve-destructive-plan=*|--allow-destructive-plan=*)
+                    grep -Fq -- '--approve-destructive-plan=' "$setup_script" || {
+                        echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support destructive-plan hashes.${NC}"
+                        return 1
+                    }
+                    ;;
+                *)
+                    grep -Eq "^[[:space:]]*${forwarded}\\)" "$setup_script" || {
+                        echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support ${forwarded}.${NC}"
+                        return 1
+                    }
+                    ;;
+            esac
+        done
+        setup_arguments+=("${FORWARD_SETUP_ARGUMENTS[@]}")
     fi
+    "$setup_script" "${setup_arguments[@]}"
 }
 
 parse_bootstrap_arguments "$@"
