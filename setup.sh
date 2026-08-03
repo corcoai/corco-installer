@@ -60,6 +60,18 @@ parse_bootstrap_arguments() {
             --allow-destructive-plan=*)
                 FORWARD_SETUP_ARGUMENTS+=("--approve-destructive-plan=${argument#*=}")
                 ;;
+            --telegram-webhook-cutover-from=*)
+                cutover_url=${argument#*=}
+                if ! printf '%s' "$cutover_url" | grep -Eq '^https://[^[:space:]]+$'; then
+                    echo -e "${RED}Error: Telegram webhook cutover source must be a complete HTTPS URL.${NC}" >&2
+                    return 1
+                fi
+                FORWARD_SETUP_ARGUMENTS+=("$argument")
+                ;;
+            --telegram-webhook-cutover-from)
+                echo -e "${RED}Error: --telegram-webhook-cutover-from requires the exact current HTTPS URL.${NC}" >&2
+                return 1
+                ;;
             *)
                 echo -e "${RED}Error: unknown bootstrap argument: $argument${NC}" >&2
                 return 1
@@ -82,6 +94,12 @@ launch_main_setup() {
                 --approve-destructive-plan=*|--allow-destructive-plan=*)
                     grep -Fq -- '--approve-destructive-plan=' "$setup_script" || {
                         echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support destructive-plan hashes.${NC}"
+                        return 1
+                    }
+                    ;;
+                --telegram-webhook-cutover-from=*)
+                    grep -Fq -- '--telegram-webhook-cutover-from=*' "$setup_script" || {
+                        echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support Telegram webhook cutover gates.${NC}"
                         return 1
                     }
                     ;;

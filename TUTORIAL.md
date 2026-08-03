@@ -18,7 +18,7 @@ Either way the script detects your domain and configures everything from there.
 
 ## Public Setup Options
 
-The public bootstrap accepts `--token=<token>` and the five forwarding options below.
+The public bootstrap accepts `--token=<token>` and the six forwarding options below.
 It rejects every other argument before downloading or running a release.
 
 | Option | Behavior |
@@ -28,6 +28,7 @@ It rejects every other argument before downloading or running a release.
 | `--upgrade` | Implies both `--resume` and `--reuse-saved`. Reconciles an existing completed deployment with the downloaded release. |
 | `--approve-destructive-plan=<sha256>` | Approves the exact non-protected deletion manifest whose lowercase SHA-256 was printed by a blocked setup plan. |
 | `--allow-destructive-plan=<sha256>` | Compatibility alias normalized by the bootstrap to `--approve-destructive-plan=<sha256>` before the verified release is launched. |
+| `--telegram-webhook-cutover-from=<https-url>` | Authorizes moving the bot only when Telegram's live current webhook exactly matches this URL. The approval is ephemeral and is never saved or reused. |
 
 Use the `--token=<token>` form with an equals sign. `--token <token>`, bare approval
 flags, values attached to mode flags such as `--resume=true`, and unknown options are not
@@ -75,6 +76,18 @@ their combination.
 
 The original token is required on every rerun. It is not recovered from saved setup
 state.
+
+If setup reports that a Telegram bot belongs to another deployment, inspect the live
+URL it prints. Only after confirming that the old deployment should relinquish the bot,
+rerun with the exact compare-and-set gate:
+
+```sh
+./setup.sh --token=<original-token> --upgrade --telegram-webhook-cutover-from=<exact-current-https-url>
+```
+
+An empty, different or subsequently changed live URL invalidates the approval. The flag
+is intentionally excluded from saved-answer state so a later rerun cannot repeat an old
+cutover decision.
 
 ## Approve a Reviewed Deletion Manifest
 

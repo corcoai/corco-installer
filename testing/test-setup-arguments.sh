@@ -8,6 +8,7 @@ TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
 VALID_HASH="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+CUTOVER_URL="https://telegram-webhook-old.example.test"
 MOCK_BIN="$TEMP_DIR/mock-bin"
 PACKAGE_DIR="$TEMP_DIR/package"
 mkdir -p "$MOCK_BIN" "$PACKAGE_DIR/deployment/scripts"
@@ -68,6 +69,7 @@ SUPPORTED_RELEASE=$(build_release supported \
     '        --upgrade) ;;' \
     '        --approve-destructive-plan=*) ;;' \
     '        --allow-destructive-plan=*) ;;' \
+    '        --telegram-webhook-cutover-from=*) ;;' \
     '    esac' \
     'fi' \
     'printf "%s\n" "$@" > "$CAPTURE_FILE"')
@@ -199,6 +201,7 @@ assert_forwarded reuse-saved "v0.0.1" --reuse-saved
 assert_forwarded upgrade "v0.0.1" --upgrade
 assert_forwarded approve-hash "v0.0.1" --approve-destructive-plan="$VALID_HASH"
 assert_forwarded upgrade-approved "v0.0.1" --upgrade --approve-destructive-plan="$VALID_HASH"
+assert_forwarded telegram-cutover "v0.0.1" --upgrade --telegram-webhook-cutover-from="$CUTOVER_URL"
 
 if ! run_bootstrap allow-hash-alias "$CANONICAL_HASH_RELEASE" "v0.0.1" \
     --token=test-token --allow-destructive-plan="$VALID_HASH"; then
@@ -218,6 +221,8 @@ assert_rejected_before_release unknown-flag --unsupported=value
 assert_rejected_before_release resume-value --resume=true
 assert_rejected_before_release bare-approve --approve-destructive-plan
 assert_rejected_before_release bare-allow --allow-destructive-plan
+assert_rejected_before_release bare-telegram-cutover --telegram-webhook-cutover-from
+assert_rejected_before_release insecure-telegram-cutover --telegram-webhook-cutover-from=http://old.example.test
 assert_rejected_before_release split-token --token test-token
 assert_rejected_before_release internal-domain --domain=example.test
 
@@ -234,6 +239,9 @@ assert_release_rejected future-version-approve "$UNSUPPORTED_RELEASE" "v99.0.0" 
 assert_release_rejected future-version-alias "$UNSUPPORTED_RELEASE" "v99.0.0" \
     "downloaded release v99.0.0 does not support destructive-plan hashes" \
     --allow-destructive-plan="$VALID_HASH"
+assert_release_rejected future-version-telegram-cutover "$UNSUPPORTED_RELEASE" "v99.0.0" \
+    "downloaded release v99.0.0 does not support Telegram webhook cutover gates" \
+    --telegram-webhook-cutover-from="$CUTOVER_URL"
 assert_release_rejected mixed-release-capabilities "$RESUME_ONLY_RELEASE" "v1.3.8" \
     "downloaded release v1.3.8 does not support --upgrade" --resume --upgrade
 
