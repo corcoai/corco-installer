@@ -47,17 +47,40 @@ echo -e "${CYAN}║                                                             
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Parse arguments (if provided)
-TOKEN=""
-for i in "$@"; do
-case $i in
-    --token=*)
-    TOKEN="${i#*=}"
-    ;;
-    *)
-    ;;
-esac
-done
+# Parse only the public bootstrap's interface. Saved-answer mode is forwarded to
+# the verified installer from the downloaded package; arbitrary arguments are not.
+parse_bootstrap_arguments() {
+    TOKEN=""
+    FORWARD_REUSE_SAVED="false"
+    for argument in "$@"; do
+        case $argument in
+            --token=*) TOKEN="${argument#*=}" ;;
+            --reuse-saved) FORWARD_REUSE_SAVED="true" ;;
+            *) ;;
+        esac
+    done
+}
+
+launch_main_setup() {
+    local setup_script=$1
+    local setup_arguments=(
+        --token="$TOKEN"
+        --domain="$DOMAIN"
+        --consultant="$CONSULTANT"
+    )
+    if [ "$FORWARD_REUSE_SAVED" == "true" ]; then
+        if ! grep -Eq '^[[:space:]]*--reuse-saved\)' "$setup_script"; then
+            echo -e "${RED}Error: downloaded release ${RELEASE_VERSION:-unknown} does not support --reuse-saved.${NC}"
+            echo "Wait for the saved-answer release to be promoted, then run the same command again."
+            return 1
+        fi
+        "$setup_script" "${setup_arguments[@]}" --reuse-saved
+    else
+        "$setup_script" "${setup_arguments[@]}"
+    fi
+}
+
+parse_bootstrap_arguments "$@"
 
 # If no token provided, prompt for it
 if [ -z "$TOKEN" ]; then
@@ -196,5 +219,5 @@ echo ""
 cd corco-installer/deployment/scripts
 chmod +x setup.sh
 
-# Pass token and extracted data to real setup
-./setup.sh --token="$TOKEN" --domain="$DOMAIN" --consultant="$CONSULTANT"
+# Pass token, extracted data and the explicitly supported mode to the real setup.
+launch_main_setup ./setup.sh
