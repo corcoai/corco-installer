@@ -113,3 +113,6 @@ jobs:
           fi
           echo "Checking $count scripts."
           git ls-files -z '*.sh' | xargs -0 ./shellcheck --severity=error
+
+      - name: Verify setup argument forwarding
+        run: bash testing/test-setup-arguments.sh
