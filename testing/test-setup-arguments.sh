@@ -67,6 +67,7 @@ SUPPORTED_RELEASE=$(build_release supported \
     '        --resume) ;;' \
     '        --reuse-saved) ;;' \
     '        --upgrade) ;;' \
+    '        --bootstrap-operator-access) ;;' \
     '        --approve-destructive-plan=*) ;;' \
     '        --allow-destructive-plan=*) ;;' \
     '        --telegram-webhook-cutover-from=*) ;;' \
@@ -199,6 +200,7 @@ assert_forwarded token-only "v0.0.1"
 assert_forwarded resume "v0.0.1" --resume
 assert_forwarded reuse-saved "v0.0.1" --reuse-saved
 assert_forwarded upgrade "v0.0.1" --upgrade
+assert_forwarded operator-bootstrap "v0.0.1" --bootstrap-operator-access
 assert_forwarded approve-hash "v0.0.1" --approve-destructive-plan="$VALID_HASH"
 assert_forwarded upgrade-approved "v0.0.1" --upgrade --approve-destructive-plan="$VALID_HASH"
 assert_forwarded telegram-cutover "v0.0.1" --upgrade --telegram-webhook-cutover-from="$CUTOVER_URL"
@@ -233,6 +235,9 @@ assert_release_rejected future-version-reuse "$UNSUPPORTED_RELEASE" "v99.0.0" \
     "downloaded release v99.0.0 does not support --reuse-saved" --reuse-saved
 assert_release_rejected future-version-upgrade "$UNSUPPORTED_RELEASE" "v99.0.0" \
     "downloaded release v99.0.0 does not support --upgrade" --upgrade
+assert_release_rejected future-version-operator-bootstrap "$UNSUPPORTED_RELEASE" "v99.0.0" \
+    "downloaded release v99.0.0 does not support --bootstrap-operator-access" \
+    --bootstrap-operator-access
 assert_release_rejected future-version-approve "$UNSUPPORTED_RELEASE" "v99.0.0" \
     "downloaded release v99.0.0 does not support destructive-plan hashes" \
     --approve-destructive-plan="$VALID_HASH"

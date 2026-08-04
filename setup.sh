@@ -55,7 +55,9 @@ parse_bootstrap_arguments() {
     for argument in "$@"; do
         case $argument in
             --token=*) TOKEN="${argument#*=}" ;;
-            --resume|--reuse-saved|--upgrade) FORWARD_SETUP_ARGUMENTS+=("$argument") ;;
+            --resume|--reuse-saved|--upgrade|--bootstrap-operator-access)
+                FORWARD_SETUP_ARGUMENTS+=("$argument")
+                ;;
             --approve-destructive-plan=*) FORWARD_SETUP_ARGUMENTS+=("$argument") ;;
             --allow-destructive-plan=*)
                 FORWARD_SETUP_ARGUMENTS+=("--approve-destructive-plan=${argument#*=}")
