@@ -116,7 +116,14 @@ launch_main_setup() {
         done
         setup_arguments+=("${FORWARD_SETUP_ARGUMENTS[@]}")
     fi
-    "$setup_script" "${setup_arguments[@]}"
+    # `curl | bash` leaves stdin at EOF after Bash consumes the bootstrap.
+    # Give interactive setup commands the controlling terminal when available,
+    # while detached automation keeps its inherited noninteractive stdin.
+    if ( : </dev/tty ) 2>/dev/null; then
+        "$setup_script" "${setup_arguments[@]}" </dev/tty
+    else
+        "$setup_script" "${setup_arguments[@]}"
+    fi
 }
 
 parse_bootstrap_arguments "$@"
