@@ -36,7 +36,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-clear
+# Screen clearing is cosmetic and may fail when TERM is unset or output is not a TTY.
+clear 2>/dev/null || true
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
