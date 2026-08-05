@@ -42,7 +42,7 @@ clear 2>/dev/null || true
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║                                                                          ║${NC}"
-echo -e "${CYAN}║   ${BOLD}CORCO UTTERANCES${NC}${CYAN}                                                      ║${NC}"
+echo -e "${CYAN}║   ${BOLD}CORCO UTTERANCES${NC}${CYAN}                                                       ║${NC}"
 echo -e "${CYAN}║   AI Communications Platform Setup                                       ║${NC}"
 echo -e "${CYAN}║                                                                          ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
