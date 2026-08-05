@@ -13,3 +13,7 @@ env/
 
 # Linter cache
 .ruff_cache/
+
+# Build artifacts (release tarball + extracted test output)
+corco-installer.tar.gz
+corco-installer/
