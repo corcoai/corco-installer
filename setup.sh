@@ -164,6 +164,20 @@ CLIENT_RESPONSE=$(curl -fsS -X GET "${SETUP_SERVICE_URL}/api/client/${TOKEN}" ||
 DOMAIN=$(json_string_field "$CLIENT_RESPONSE" domain || true)
 COMPANY=$(json_string_field "$CLIENT_RESPONSE" company_name || true)
 CONSULTANT=$(json_string_field "$CLIENT_RESPONSE" consultant_email || true)
+# This client's own terraform variables, base64 of the whole file in one JSON
+# string. It arrives here and not in the release archive because the archive is
+# identical for every client: shipping deployment/terraform/environments/ in it
+# handed each client every other client's gcp_project_id, admin email, Drive
+# folder and Twilio caller id. This endpoint is already token-scoped and already
+# authorizes server-side, so there is no object path to enumerate and no
+# per-client bucket ACL to get wrong.
+#
+# Base64 of the file rather than a field per variable: the tfvars has some
+# twenty-five keys that deployment/scripts/setup.sh derives together, and a
+# second derivation of them here would drift from that one. Empty is the normal
+# case -- a first-time client has no stored tfvars, and the installer generates
+# one from the answers it collects.
+CLIENT_TFVARS_B64=$(json_string_field "$CLIENT_RESPONSE" tfvars_base64 || true)
 
 if [ -n "$DOMAIN" ]; then
     echo -e "${GREEN}✓ Setting up for: ${BOLD}${COMPANY}${NC} ${GREEN}(${DOMAIN})${NC}"
@@ -235,10 +249,50 @@ echo -e "${GREEN}✓ Integrity verified (sha256 ${ACTUAL_SHA256})${NC}"
 echo ""
 
 # 5. Extract
+#
+# The archive carries no environments/ and no taxonomies/approved/: it is one
+# artifact for every client, so it can carry no client's own data. That makes the
+# rm -rf below destructive in a way it was not before -- it used to wipe those two
+# directories and the archive put them straight back. So this tenant's own copies
+# are carried across the wipe and restored afterwards. Only this tenant's: the
+# taxonomy is taken by name, so a stale folder belonging to some other domain is
+# not carried forward.
+#
+# This is what makes the exclusion safe to ship before the setup service learns to
+# return a stored tfvars. An upgrade keeps the file it already had, including hand
+# edits the installer cannot re-derive.
 echo -e "${BLUE}• Extracting files...${NC}"
+
+PRESERVE_DIR=""
+if [ -d corco-installer/deployment ]; then
+    PRESERVE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/corco-preserve.XXXXXX")"
+    chmod 700 "$PRESERVE_DIR"
+    if [ -d corco-installer/deployment/terraform/environments ]; then
+        cp -R corco-installer/deployment/terraform/environments "$PRESERVE_DIR/environments"
+    fi
+    if [ -n "$DOMAIN" ] && [ -d "corco-installer/deployment/taxonomies/approved/${DOMAIN}" ]; then
+        mkdir -p "$PRESERVE_DIR/approved"
+        cp -R "corco-installer/deployment/taxonomies/approved/${DOMAIN}" "$PRESERVE_DIR/approved/${DOMAIN}"
+    fi
+fi
+
 rm -rf corco-installer 2>/dev/null || true
 mkdir -p corco-installer
 tar -xzf corco-installer.tar.gz -C corco-installer
+
+if [ -n "$PRESERVE_DIR" ]; then
+    if [ -d "$PRESERVE_DIR/environments" ]; then
+        mkdir -p corco-installer/deployment/terraform
+        cp -R "$PRESERVE_DIR/environments" corco-installer/deployment/terraform/environments
+        echo -e "${GREEN}✓ Kept the existing deployment configuration${NC}"
+    fi
+    if [ -d "$PRESERVE_DIR/approved/${DOMAIN}" ]; then
+        mkdir -p corco-installer/deployment/taxonomies/approved
+        cp -R "$PRESERVE_DIR/approved/${DOMAIN}" "corco-installer/deployment/taxonomies/approved/${DOMAIN}"
+        echo -e "${GREEN}✓ Kept the existing topic taxonomy${NC}"
+    fi
+    rm -rf "$PRESERVE_DIR"
+fi
 
 if [ ! -f corco-installer/deployment/scripts/setup.sh ]; then
     echo -e "${RED}Error: Invalid package structure.${NC}"
@@ -247,6 +301,81 @@ fi
 
 echo -e "${GREEN}✓ Extracted${NC}"
 echo ""
+
+# 5b. Place this client's terraform variables
+# The archive deliberately carries no environments/ directory (it is one archive
+# for every client, so it can carry no client's configuration). Two paths lead
+# out of that, and only one of them writes a file here:
+#
+#   - First install: the setup service has no stored tfvars for this client, so
+#     nothing is written and deployment/scripts/setup.sh generates
+#     environments/<domain>.tfvars from the answers it collects. This is the
+#     normal path and it is unchanged.
+#   - Re-install or upgrade over a live deployment: the stored tfvars is the
+#     only record of decisions that installer cannot re-derive -- the bucket
+#     prefix the live Eventarc trigger filters on, the tuned scheduler cadences,
+#     whether AI enrichment was turned on. It is restored here, before the
+#     installer runs, because the installer treats an existing file as
+#     authoritative and never overwrites it.
+#
+# A partial file is worse than no file for exactly that reason, so this writes
+# the service's file verbatim or writes nothing at all.
+place_client_tfvars() {
+    [ -n "$CLIENT_TFVARS_B64" ] || return 0
+
+    # A file preserved across the extraction wins over anything the service sends.
+    # The installer treats an existing tfvars as final and never regenerates it, so
+    # editing that file is the supported way to change a deployment -- which makes
+    # the copy on this machine the only place a hand edit can live. The service's
+    # copy is the fallback for a client with no local file, not a newer truth.
+    if [ -n "$DOMAIN" ] && [ -f "corco-installer/deployment/terraform/environments/${DOMAIN}.tfvars" ]; then
+        return 0
+    fi
+
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}Error: the setup service sent terraform variables but no domain.${NC}" >&2
+        echo "Refusing to guess which deployment they describe. Contact support@corco.ai." >&2
+        return 1
+    fi
+
+    local decoded
+    if decoded=$(printf '%s' "$CLIENT_TFVARS_B64" | base64 -d 2>/dev/null); then
+        :
+    elif decoded=$(printf '%s' "$CLIENT_TFVARS_B64" | base64 -D 2>/dev/null); then
+        :
+    elif decoded=$(printf '%s' "$CLIENT_TFVARS_B64" | openssl base64 -d -A 2>/dev/null); then
+        :
+    else
+        echo -e "${RED}Error: could not decode the configuration the setup service sent.${NC}" >&2
+        echo "Do not continue with a partial configuration - contact support@corco.ai." >&2
+        return 1
+    fi
+
+    # Two assertions, because a file that is not this tenant's, or not complete,
+    # would be applied as though it were: the installer does not re-check it.
+    if ! printf '%s' "$decoded" | grep -Eq '^[[:space:]]*gcp_project_id[[:space:]]*='; then
+        echo -e "${RED}Error: the configuration sent for ${DOMAIN} names no GCP project.${NC}" >&2
+        echo "Contact support@corco.ai and quote 'incomplete tfvars'." >&2
+        return 1
+    fi
+    if ! printf '%s' "$decoded" | grep -Eq "^[[:space:]]*workspace_domain[[:space:]]*=[[:space:]]*\"${DOMAIN}\"[[:space:]]*$"; then
+        echo -e "${RED}Error: the configuration sent does not belong to ${DOMAIN}.${NC}" >&2
+        echo "Contact support@corco.ai and quote 'tfvars domain mismatch'." >&2
+        return 1
+    fi
+
+    local environments_dir="corco-installer/deployment/terraform/environments"
+    mkdir -p "$environments_dir"
+    chmod 700 "$environments_dir"
+    # Owner-only from the moment it exists: it names this deployment's project,
+    # administrator and telephony identity.
+    ( umask 077 && printf '%s\n' "$decoded" > "${environments_dir}/${DOMAIN}.tfvars" )
+    chmod 600 "${environments_dir}/${DOMAIN}.tfvars"
+    echo -e "${GREEN}✓ Restored existing configuration for ${DOMAIN}${NC}"
+    echo ""
+}
+
+place_client_tfvars
 
 # 6. Run Real Setup
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
