@@ -116,3 +116,6 @@ jobs:
 
       - name: Verify setup argument forwarding
         run: bash testing/test-setup-arguments.sh
+
+      - name: Verify setup stdin routing
+        run: bash testing/test-setup-stdin.sh

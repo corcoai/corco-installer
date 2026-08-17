@@ -47,7 +47,10 @@ printf '%s\n' \
     'esac' > "$MOCK_BIN/curl"
 chmod +x "$MOCK_BIN/curl"
 
-printf '%s\n' '#!/bin/bash' 'exit 0' > "$MOCK_BIN/clear"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'echo "TERM environment variable not set." >&2' \
+    'exit 1' > "$MOCK_BIN/clear"
 chmod +x "$MOCK_BIN/clear"
 
 build_release() {
@@ -140,6 +143,7 @@ run_bootstrap() {
 
     (
         cd "$run_dir"
+        env -u TERM \
         TEST_RELEASE_ARCHIVE="$archive" \
         TEST_RELEASE_SHA256="$(release_sha256 "$archive")" \
         TEST_RELEASE_VERSION="$version" \
@@ -196,6 +200,18 @@ assert_release_rejected() {
 }
 
 # Every public forwarding path is asserted independently so removing any one case fails.
+if ! run_bootstrap unset-term "$SUPPORTED_RELEASE" "v0.0.1" \
+    --token=test-token; then
+    sed -n '1,200p' "$TEMP_DIR/output-unset-term" >&2
+    fail "bootstrap aborted before launch when TERM was unset"
+fi
+printf '%s\n' \
+    '--token=test-token' \
+    '--domain=example.test' \
+    '--consultant=support@example.test' > "$TEMP_DIR/expected-unset-term"
+cmp "$TEMP_DIR/expected-unset-term" "$TEMP_DIR/capture-unset-term" \
+    || fail "bootstrap did not launch the downloaded installer when TERM was unset"
+
 assert_forwarded token-only "v0.0.1"
 assert_forwarded resume "v0.0.1" --resume
 assert_forwarded reuse-saved "v0.0.1" --reuse-saved

@@ -36,12 +36,13 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-clear
+# Screen clearing is cosmetic and may fail when TERM is unset or output is not a TTY.
+clear 2>/dev/null || true
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║                                                                          ║${NC}"
-echo -e "${CYAN}║   ${BOLD}CORCO UTTERANCES${NC}${CYAN}                                                      ║${NC}"
+echo -e "${CYAN}║   ${BOLD}CORCO UTTERANCES${NC}${CYAN}                                                       ║${NC}"
 echo -e "${CYAN}║   AI Communications Platform Setup                                       ║${NC}"
 echo -e "${CYAN}║                                                                          ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
@@ -115,7 +116,14 @@ launch_main_setup() {
         done
         setup_arguments+=("${FORWARD_SETUP_ARGUMENTS[@]}")
     fi
-    "$setup_script" "${setup_arguments[@]}"
+    # `curl | bash` leaves stdin at EOF after Bash consumes the bootstrap.
+    # Give interactive setup commands the controlling terminal when available,
+    # while detached automation keeps its inherited noninteractive stdin.
+    if ( : </dev/tty ) 2>/dev/null; then
+        "$setup_script" "${setup_arguments[@]}" </dev/tty
+    else
+        "$setup_script" "${setup_arguments[@]}"
+    fi
 }
 
 parse_bootstrap_arguments "$@"
