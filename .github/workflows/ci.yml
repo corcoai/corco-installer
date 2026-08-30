@@ -120,6 +120,13 @@ jobs:
       - name: Verify setup stdin routing
         run: bash testing/test-setup-stdin.sh
 
+      - name: Verify the setup token prompt
+        # Named here for the same reason as the step below. This one drives a real pty,
+        # because the prompt only behaves like a prompt when stdin is a terminal, and
+        # TUTORIAL.md teaches it in preference to --token= -- so its no-echo property is
+        # a documented promise and not an implementation detail.
+        run: bash testing/test-setup-token-prompt.sh
+
       - name: Verify teardown token transport
         # The teardown token and the tenant's Telegram bot token must stay out of every
         # command line, and out of the tutorial the customer copies from. Named here

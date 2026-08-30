@@ -30,9 +30,21 @@ It rejects every other argument before downloading or running a release.
 | `--allow-destructive-plan=<sha256>` | Compatibility alias normalized by the bootstrap to `--approve-destructive-plan=<sha256>` before the verified release is launched. |
 | `--telegram-webhook-cutover-from=<https-url>` | Authorizes moving the bot only when Telegram's live current webhook exactly matches this URL. The approval is ephemeral and is never saved or reused. |
 
-Use the `--token=<token>` form with an equals sign. `--token <token>`, bare approval
-flags, values attached to mode flags such as `--resume=true`, and unknown options are not
-part of the public interface.
+`--token=<token>` uses an equals sign. `--token <token>`, bare approval flags, values
+attached to mode flags such as `--resume=true`, and unknown options are not part of the
+public interface.
+
+**Prefer leaving the token off the command line.** Every rerun below is written without
+it, because the script asks for it and does not display what you type. A token typed as
+`--token=...` is written into your shell history, where it stays after the run and after
+the token itself has expired; it is also visible in the process list while the script
+runs. Neither is true of the prompt. The `--token=` form still works and is what the
+setup page's own copy-paste command uses, so nothing you were given stops working -- it
+is simply not the form to type by hand.
+
+One thing the prompt does not change: the release's own installer still receives the
+token as an argument, so it appears in that process's arguments either way. What the
+prompt removes is the copy that outlives the run.
 
 ### Resume an Interactive Run
 
@@ -40,7 +52,7 @@ Use `--resume` when a previous run stopped and you are available to answer anyth
 was not saved:
 
 ```sh
-./setup.sh --token=<original-token> --resume
+./setup.sh --resume
 ```
 
 ### Reuse Every Saved Answer
@@ -49,7 +61,7 @@ Use `--reuse-saved` for a previously configured, incomplete run when you do not 
 reconfirm existing choices:
 
 ```sh
-./setup.sh --token=<original-token> --reuse-saved
+./setup.sh --reuse-saved
 ```
 
 This reuses saved company details, project, integration choices, folder IDs, caller ID
@@ -62,7 +74,7 @@ security or destructive decision is required.
 Use `--upgrade` to apply the downloaded release to a setup already marked complete:
 
 ```sh
-./setup.sh --token=<original-token> --upgrade
+./setup.sh --upgrade
 ```
 
 Upgrade restores and validates the saved answers, reruns infrastructure reconciliation
@@ -74,15 +86,15 @@ Pass the strongest single mode you need. Supplying multiple modes is redundant; 
 bootstrap forwards them unchanged and the downloaded installer remains the authority on
 their combination.
 
-The original token is required on every rerun. It is not recovered from saved setup
-state.
+The original token is required on every rerun and is not recovered from saved setup
+state, so have it to hand. Run the command as written and the script will ask for it.
 
 If setup reports that a Telegram bot belongs to another deployment, inspect the live
 URL it prints. Only after confirming that the old deployment should relinquish the bot,
 rerun with the exact compare-and-set gate:
 
 ```sh
-./setup.sh --token=<original-token> --upgrade --telegram-webhook-cutover-from=<exact-current-https-url>
+./setup.sh --upgrade --telegram-webhook-cutover-from=<exact-current-https-url>
 ```
 
 An empty, different or subsequently changed live URL invalidates the approval. The flag
@@ -99,7 +111,7 @@ manifest SHA-256.
 Review that saved plan, then rerun the same command with the exact printed hash:
 
 ```sh
-./setup.sh --token=<original-token> --upgrade \
+./setup.sh --upgrade \
   --approve-destructive-plan=<printed-lowercase-sha256>
 ```
 
@@ -112,7 +124,7 @@ The legacy spelling is equivalent. The bootstrap normalizes it to the canonical 
 so it also works with releases that expose only the canonical public option:
 
 ```sh
-./setup.sh --token=<original-token> --upgrade \
+./setup.sh --upgrade \
   --allow-destructive-plan=<printed-lowercase-sha256>
 ```
 

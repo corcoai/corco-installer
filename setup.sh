@@ -128,12 +128,23 @@ launch_main_setup() {
 
 parse_bootstrap_arguments "$@"
 
-# If no token provided, prompt for it
+# If no token provided, prompt for it.
+#
+# -s, matching teardown.sh's own prompt, and it is not cosmetic. Without it the token is
+# echoed to the screen, which puts it in the terminal scrollback and in whatever
+# transcript or session recording the environment keeps -- and Cloud Shell keeps one.
+# That is a worse place for it than argv, because scrollback is read by anyone who
+# glances at the screen and outlives the process. TUTORIAL.md now teaches this prompt in
+# preference to --token=, so it has to be the safer route in fact and not just in
+# intention.
+#
+# read still reads a pipe when stdin is not a terminal, so this changes nothing for the
+# non-interactive path that test-setup-stdin.sh covers.
 if [ -z "$TOKEN" ]; then
     echo -e "${YELLOW}Please enter your setup token.${NC}"
     echo -e "You can find this on your setup page at ${CYAN}setup.corco.ai${NC}"
     echo ""
-    read -r -p "Setup Token: " TOKEN
+    read -rs -p "Setup Token: " TOKEN
     echo ""
 fi
 
