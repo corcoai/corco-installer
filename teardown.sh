@@ -8,7 +8,7 @@
 #   - Client offboarding
 #
 # Usage:
-#   ./teardown.sh <domain> [--token=xxx]   # Interactive, keeps secrets
+#   ./teardown.sh <domain>                 # Interactive, keeps secrets; asks for the token
 #   ./teardown.sh <domain> --full          # Also deletes secrets
 #   ./teardown.sh <domain> --project-only  # Keep Terraform state for reimport
 #
@@ -106,7 +106,23 @@ prompt_yes_no() {
 # -----------------------------------------------------------------------------
 
 DOMAIN=""
-TEARDOWN_TOKEN=""
+# The teardown token authorizes deleting a whole tenant, so it has three routes that keep
+# it out of this process's command line and one, kept for compatibility, that does not:
+#
+#   CORCO_TEARDOWN_TOKEN in the environment  -- unattended callers
+#   --token-stdin                            -- one line on standard input, for pipelines
+#   the prompt below                         -- nothing supplied and a terminal to ask on
+#   --token / --token=<value>                -- still accepted, and warned about
+#
+# This script runs in Google Cloud Shell, a VM the customer shares with everything else
+# they happen to be running, and /proc/<pid>/cmdline is world-readable for the whole life
+# of a process -- minutes, for a teardown. The same argument is written to the shell
+# history besides. The prompt is the route the teardown landing page points customers at.
+# The environment is read once and immediately unset, so the gcloud, terraform and curl
+# children this script spawns do not inherit the credential.
+TEARDOWN_TOKEN="${CORCO_TEARDOWN_TOKEN:-}"
+unset CORCO_TEARDOWN_TOKEN
+TEARDOWN_TOKEN_FROM_ARGV=false
 DELETE_DATA=false
 DELETE_SECRETS=false
 DELETE_CONFIG=false
@@ -121,11 +137,20 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --token=*)
             TEARDOWN_TOKEN="${1#*=}"
+            TEARDOWN_TOKEN_FROM_ARGV=true
             shift
             ;;
         --token)
             TEARDOWN_TOKEN="$2"
+            TEARDOWN_TOKEN_FROM_ARGV=true
             shift 2
+            ;;
+        # One line, unechoed, and gone from the pipe once read. The flag names the route
+        # so a caller cannot supply a token this way by accident: this script's own stdin
+        # otherwise carries the customer's typed confirmations further down.
+        --token-stdin)
+            IFS= read -r TEARDOWN_TOKEN || true
+            shift
             ;;
         --delete-data)
             DELETE_DATA=true
@@ -173,6 +198,14 @@ while [[ $# -gt 0 ]]; do
             echo "  • BigQuery tables (all communications data)"
             echo "  • Secrets (API keys, credentials)"  
             echo "  • Configuration files (tfvars)"
+            echo ""
+            echo "Supplying the teardown token (it authorizes the two Corco callbacks):"
+            echo "  $0 <domain>                                 Prompted for, unechoed"
+            echo "  CORCO_TEARDOWN_TOKEN=<token> $0 <domain>   Read from the environment"
+            echo "  $0 <domain> --token-stdin                   Read one line from stdin"
+            echo "  --token=<token>      Accepted, but DISCOURAGED: an argument stands in"
+            echo "                       /proc/<pid>/cmdline for the whole teardown and is"
+            echo "                       written to your shell history"
             echo ""
             echo "Options:"
             echo "  --delete-data        Also delete BigQuery dataset (IRREVERSIBLE)"
@@ -229,6 +262,26 @@ fi
 if [ -z "$DOMAIN" ]; then
     log_error "No domain specified"
     exit 1
+fi
+
+# Said once, on the run that did it, rather than left to a document nobody re-reads. The
+# value is never echoed back -- naming the flag is enough to identify what leaked.
+if [ "$TEARDOWN_TOKEN_FROM_ARGV" == "true" ]; then
+    log_warning "--token puts the teardown token in this process's command line"
+    echo "  /proc/<pid>/cmdline is readable by everything else running on this machine"
+    echo "  for as long as the teardown runs, and the argument is in your shell history."
+    echo "  Next time: run $0 $DOMAIN and paste the token at the prompt."
+fi
+
+# Nothing supplied and a terminal to ask on. Unechoed, and never an argument. This is the
+# route the teardown landing page tells customers to use.
+#
+# Empty stays allowed, deliberately. The token authenticates the two Corco callbacks and
+# nothing else -- it gates no destructive step here -- and an administrator tearing down
+# a project they own may legitimately not hold one.
+if [ -z "$TEARDOWN_TOKEN" ] && [ -t 0 ]; then
+    read -rs -p "Teardown token (paste it, or press Enter to skip): " TEARDOWN_TOKEN
+    echo ""
 fi
 
 # Check tfvars file exists
@@ -429,14 +482,23 @@ fi
 # Notify Corco (silent - don't show internal callback status to user)
 DEPLOYER=$(gcloud config get-value account 2>/dev/null || echo "unknown")
 if command -v curl &> /dev/null; then
-    curl -s -X POST "$TEARDOWN_CALLBACK_URL/start" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"domain\": \"$DOMAIN\",
-            \"token\": \"$TEARDOWN_TOKEN\",
-            \"initiated_by\": \"$DEPLOYER\",
-            \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
-        }" >/dev/null 2>&1 || true
+    # The body carries the token that authorizes this tenant's teardown, so it reaches
+    # curl on standard input rather than in argv. A -d argument stands in
+    # /proc/<pid>/cmdline for the life of the request, and this script runs in a Cloud
+    # Shell VM shared with whatever else the customer is running -- any of which can read
+    # it. A curl config value is one line, so the body is emitted compact; the URL stays
+    # an argument because it carries no credential.
+    TEARDOWN_CALLBACK_BODY=$(printf \
+        '{"domain": "%s", "token": "%s", "initiated_by": "%s", "timestamp": "%s"}' \
+        "$DOMAIN" "$TEARDOWN_TOKEN" "$DEPLOYER" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")
+    TEARDOWN_CALLBACK_BODY=${TEARDOWN_CALLBACK_BODY//\\/\\\\}
+    TEARDOWN_CALLBACK_BODY=${TEARDOWN_CALLBACK_BODY//\"/\\\"}
+    {
+        printf '%s\n' 'silent' 'request = "POST"'
+        printf '%s\n' 'header = "Content-Type: application/json"'
+        printf 'data = "%s"\n' "$TEARDOWN_CALLBACK_BODY"
+    } | curl -q --config - "$TEARDOWN_CALLBACK_URL/start" >/dev/null 2>&1 || true
+    unset TEARDOWN_CALLBACK_BODY
 fi
 
 # -----------------------------------------------------------------------------
@@ -483,7 +545,23 @@ if [ "$KEEP_PROJECT" == "true" ] && [ "$PROJECT_EXISTS" == "true" ]; then
     echo "  [1/7] Telegram webhook..."
     TELEGRAM_TOKEN=$(gcloud secrets versions access latest --secret="CORCO_TELEGRAM_BOT_TOKEN" --project="$PROJECT_ID" 2>/dev/null || echo "")
     if [ -n "$TELEGRAM_TOKEN" ]; then
-        curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteWebhook" >/dev/null 2>&1
+        # The tenant's live bot token, so it reaches curl on standard input like the two
+        # Corco callbacks -- an argument stands in /proc/<pid>/cmdline for the life of
+        # the request, readable by anything else sharing this Cloud Shell VM. What moves
+        # here is the WHOLE URL rather than a body, because the Telegram API
+        # authenticates by URL PATH alone: there is no body and no header to put the
+        # credential in, so the only way it leaves argv is for the URL to leave with it.
+        # A config value is one line and is unescaped by curl, so a backslash or a quote
+        # in the token would otherwise change the URL; a bot token contains neither, and
+        # escaping them costs nothing.
+        escaped_telegram_token=${TELEGRAM_TOKEN//\\/\\\\}
+        escaped_telegram_token=${escaped_telegram_token//\"/\\\"}
+        {
+            printf '%s\n' 'silent'
+            printf 'url = "https://api.telegram.org/bot%s/deleteWebhook"\n' \
+                "$escaped_telegram_token"
+        } | curl -q --config - >/dev/null 2>&1
+        unset escaped_telegram_token
         log_success "Telegram webhook removed"
     else
         echo "    No Telegram token found - skipping"
@@ -671,7 +749,19 @@ elif [ "$DELETE_DATA" == "true" ] && [ "$DELETE_SECRETS" == "true" ] && [ "$DELE
         TELEGRAM_TOKEN=$(gcloud secrets versions access latest --secret="CORCO_TELEGRAM_BOT_TOKEN" --project="$PROJECT_ID" 2>/dev/null || echo "")
         if [ -n "$TELEGRAM_TOKEN" ]; then
             echo "Removing Telegram webhook..."
-            WEBHOOK_DEL=$(curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/deleteWebhook" 2>/dev/null || echo "")
+            # Standard input, for the reason the --keep-project cleanup above gives: the
+            # Telegram API authenticates by URL PATH, so the URL is the credential and
+            # has to leave argv with it.
+            escaped_telegram_token=${TELEGRAM_TOKEN//\\/\\\\}
+            escaped_telegram_token=${escaped_telegram_token//\"/\\\"}
+            WEBHOOK_DEL=$(
+                {
+                    printf '%s\n' 'silent'
+                    printf 'url = "https://api.telegram.org/bot%s/deleteWebhook"\n' \
+                        "$escaped_telegram_token"
+                } | curl -q --config - 2>/dev/null || echo ""
+            )
+            unset escaped_telegram_token
             if echo "$WEBHOOK_DEL" | grep -q '"ok":true'; then
                 log_success "Telegram webhook removed"
             else
@@ -936,15 +1026,20 @@ fi
 
 # Notify Corco (silent)
 if command -v curl &> /dev/null; then
-    curl -s -X POST "$TEARDOWN_CALLBACK_URL/complete" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"domain\": \"$DOMAIN\",
-            \"token\": \"$TEARDOWN_TOKEN\",
-            \"delete_data\": $DELETE_DATA,
-            \"delete_secrets\": $DELETE_SECRETS,
-            \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
-        }" >/dev/null 2>&1 || true
+    # Same transport as the /start callback above, and for the same reason: the token is
+    # a credential and argv is world-readable on the machine this runs on.
+    TEARDOWN_CALLBACK_BODY=$(printf \
+        '{"domain": "%s", "token": "%s", "delete_data": %s, "delete_secrets": %s, "timestamp": "%s"}' \
+        "$DOMAIN" "$TEARDOWN_TOKEN" "$DELETE_DATA" "$DELETE_SECRETS" \
+        "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")
+    TEARDOWN_CALLBACK_BODY=${TEARDOWN_CALLBACK_BODY//\\/\\\\}
+    TEARDOWN_CALLBACK_BODY=${TEARDOWN_CALLBACK_BODY//\"/\\\"}
+    {
+        printf '%s\n' 'silent' 'request = "POST"'
+        printf '%s\n' 'header = "Content-Type: application/json"'
+        printf 'data = "%s"\n' "$TEARDOWN_CALLBACK_BODY"
+    } | curl -q --config - "$TEARDOWN_CALLBACK_URL/complete" >/dev/null 2>&1 || true
+    unset TEARDOWN_CALLBACK_BODY
 fi
 
 # -----------------------------------------------------------------------------

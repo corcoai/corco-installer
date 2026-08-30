@@ -119,3 +119,10 @@ jobs:
 
       - name: Verify setup stdin routing
         run: bash testing/test-setup-stdin.sh
+
+      - name: Verify teardown token transport
+        # The teardown token and the tenant's Telegram bot token must stay out of every
+        # command line, and out of the tutorial the customer copies from. Named here
+        # rather than discovered by a glob, so that a test file which stops being run
+        # shows up as a missing step rather than as silence.
+        run: bash testing/test-teardown-token-transport.sh

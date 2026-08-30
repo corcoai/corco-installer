@@ -54,10 +54,11 @@ Make sure you have:
 Click in the terminal below and run:
 </walkthrough-spotlight-pointer>
 
-./teardown.sh --token=YOUR_TOKEN
+./teardown.sh
 ```
 
-Replace `YOUR_TOKEN` with the token from your teardown link.
+The script asks for your domain, then for your teardown token. Paste the token from your
+teardown link at the prompt; it is not shown on screen as you paste it.
 
 The script will:
 1. Ask you to confirm by typing the domain name
@@ -80,8 +81,10 @@ This is required because Google Workspace doesn't provide an API for Domain-Wide
 If you want to PERMANENTLY delete all your data (this cannot be undone):
 
 ```bash
-./teardown.sh --token=YOUR_TOKEN --delete-data --delete-secrets --all
+./teardown.sh --delete-data --delete-secrets --all
 ```
+
+You are asked for your domain and your teardown token exactly as above.
 
 This will delete:
 - All BigQuery tables (communications history)
