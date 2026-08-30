@@ -144,8 +144,41 @@ fi
 
 echo -e "${BLUE}• Authenticating with setup service...${NC}"
 
+# The two machine calls below present the token in an Authorization header, given to
+# curl on STANDARD INPUT, and the URL carries no token at all.
+#
+# Two separate exposures, closed together. The PATH form put the token in the URL of a
+# request to Corco's own service, so it reached that service's Cloud Run request log and
+# every proxy log in front of it -- the customer's live credential sitting in the
+# vendor's logs, which is the tenancy boundary this product exists to respect. The
+# registry stores only sha256(token) precisely so that reading it yields nothing
+# redeemable, and a path segment handed back exactly what the digest was protecting.
+# Separately, a header passed as an argument would have appeared in `ps` and in this
+# VM's shell history; that is the customer's own single-tenant machine and so a much
+# smaller matter, but it costs nothing to close at the same time.
+#
+# `curl -q --config -` is the same idiom teardown.sh uses, and -q matters: without it
+# curl reads ~/.curlrc first and a stray setting there would apply to these calls.
+#
+# A config value is one line and is NOT unescaped by curl, so a backslash or a quote in
+# the token would otherwise terminate the header early. Setup tokens contain neither,
+# and escaping them costs nothing.
+#
+# The pathless routes are live on setup.corco.ai; the path form remains accepted there
+# until PROD_SETUP_TOKEN_PATH_CUTOFF, so an older bootstrap still in a customer's hands
+# keeps working. This script is pulled live from the default branch, so it is the copy
+# that stops leaking the moment this lands.
+escaped_token=${TOKEN//\\/\\\\}
+escaped_token=${escaped_token//\"/\\\"}
+
 # 1. Get Signed URL for Source Code
-RESPONSE=$(curl -fsS -X GET "${SETUP_SERVICE_URL}/api/download/${TOKEN}" || true)
+RESPONSE=$(
+    {
+        printf '%s\n' 'silent' 'show-error' 'fail' 'request = "GET"'
+        printf 'header = "Authorization: Bearer %s"\n' "$escaped_token"
+        printf 'url = "%s/api/download"\n' "$SETUP_SERVICE_URL"
+    } | curl -q --config - || true
+)
 DOWNLOAD_URL=$(json_string_field "$RESPONSE" download_url || true)
 # The identity of what we are about to install, published alongside the URL.
 EXPECTED_SHA256=$(json_string_field "$RESPONSE" sha256 || true)
@@ -168,7 +201,14 @@ echo ""
 
 # 2. Get client data for pre-population
 echo -e "${BLUE}• Fetching configuration...${NC}"
-CLIENT_RESPONSE=$(curl -fsS -X GET "${SETUP_SERVICE_URL}/api/client/${TOKEN}" || true)
+CLIENT_RESPONSE=$(
+    {
+        printf '%s\n' 'silent' 'show-error' 'fail' 'request = "GET"'
+        printf 'header = "Authorization: Bearer %s"\n' "$escaped_token"
+        printf 'url = "%s/api/client"\n' "$SETUP_SERVICE_URL"
+    } | curl -q --config - || true
+)
+unset escaped_token
 DOMAIN=$(json_string_field "$CLIENT_RESPONSE" domain || true)
 COMPANY=$(json_string_field "$CLIENT_RESPONSE" company_name || true)
 CONSULTANT=$(json_string_field "$CLIENT_RESPONSE" consultant_email || true)

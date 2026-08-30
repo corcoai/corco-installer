@@ -25,18 +25,48 @@ printf '%s\n' \
     'set -euo pipefail' \
     'output_file=""' \
     'url=""' \
+    'config_source=""' \
+    'argv_seen="$*"' \
     'while [ "$#" -gt 0 ]; do' \
     '    case "$1" in' \
     '        -o) output_file=$2; shift 2 ;;' \
+    '        --config) config_source=$2; shift 2 ;;' \
     '        https://*) url=$1; shift ;;' \
     '        *) shift ;;' \
     '    esac' \
     'done' \
+    '# The property this stub exists to enforce: a setup token may never reach argv.' \
+    '# curl argv is world-readable in ps and lands in this shell history, and the' \
+    '# whole point of moving the config to stdin is that neither can see it.' \
+    'case "$argv_seen" in' \
+    '    *test-token*)' \
+    '        echo "setup token found in curl argv: $argv_seen" >&2' \
+    '        exit 1' \
+    '        ;;' \
+    'esac' \
+    'if [ "$config_source" = "-" ]; then' \
+    '    while IFS= read -r config_line; do' \
+    '        case "$config_line" in' \
+    '            url\ =\ *)' \
+    '                url=${config_line#url = \"}' \
+    '                url=${url%\"}' \
+    '                ;;' \
+    '        esac' \
+    '    done' \
+    'fi' \
+    '# And the token may never be a URL path segment either, on any transport: that is' \
+    '# what reached Corco own request logs.' \
     'case "$url" in' \
-    '    */api/download/*)' \
+    '    *test-token*)' \
+    '        echo "setup token found in the URL: $url" >&2' \
+    '        exit 1' \
+    '        ;;' \
+    'esac' \
+    'case "$url" in' \
+    '    */api/download)' \
     '        printf "{\"download_url\":\"https://download.example/release.tar.gz\",\"sha256\":\"%s\",\"version\":\"v-test\"}" "$TEST_RELEASE_SHA256"' \
     '        ;;' \
-    '    */api/client/*)' \
+    '    */api/client)' \
     '        printf "%s" "{\"domain\":\"example.test\",\"company_name\":\"Example\",\"consultant_email\":\"support@example.test\"}"' \
     '        ;;' \
     '    https://download.example/release.tar.gz)' \
