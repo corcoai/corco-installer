@@ -9,11 +9,12 @@
 # deciding to.
 #
 # This repository has the shortest path from a commit to a customer of anything
-# in the estate, and no release step in between. setup.sh is public and clients
-# pull it live from the default branch into Google Cloud Shell, so a syntax
-# error here is not a failed build -- it is a failed onboarding, in front of the
-# client, with no tarball or tag to roll back to. There is no Python here, so
-# shellcheck carries that whole weight, over every tracked script.
+# in the estate: its only release step is moving the `release` branch, which the
+# setup page's Cloud Shell buttons clone. setup.sh is public and clients pull it
+# live from that branch into Google Cloud Shell, so a syntax error that reaches
+# it is not a failed build -- it is a failed onboarding, in front of the client,
+# until `release` is moved back. There is no Python here, so shellcheck carries
+# that whole weight, over every tracked script.
 #
 # Two of those scripts are this repository's subject: setup.sh, the bootstrap,
 # and teardown.sh. The third, deployment/scripts/setup.sh, is neither. It is a

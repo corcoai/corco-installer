@@ -11,7 +11,8 @@
 # mismatched checksum aborts the install. That makes the deployment order
 # mandatory: the setup-landing function must be serving checksums, and a
 # release built by corco-release must be in gs://corco-prod-dist, BEFORE this file
-# is pushed here -- clients pull it live from the default branch.
+# reaches the `release` branch -- clients pull it live from `release`, the branch
+# the setup page's Cloud Shell buttons clone. A push to `main` reaches no client.
 # ============================================================================
 
 set -euo pipefail
@@ -177,8 +178,8 @@ echo -e "${BLUE}• Authenticating with setup service...${NC}"
 #
 # The pathless routes are live on setup.corco.ai; the path form remains accepted there
 # until PROD_SETUP_TOKEN_PATH_CUTOFF, so an older bootstrap still in a customer's hands
-# keeps working. This script is pulled live from the default branch, so it is the copy
-# that stops leaking the moment this lands.
+# keeps working. This script is pulled live from the `release` branch, so it is the copy
+# that stops leaking the moment this reaches it.
 escaped_token=${TOKEN//\\/\\\\}
 escaped_token=${escaped_token//\"/\\\"}
 
