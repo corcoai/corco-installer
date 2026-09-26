@@ -4,11 +4,9 @@
 
 ## Run Setup
 
-Copy the **setup command** from your setup page, paste it in the terminal, and press
-**Enter**. It already contains your setup token.
+Copy the **setup command** from your setup page, paste it in the terminal, and press **Enter**. It already contains your setup token.
 
-If you would rather not go back to that page, run the script on its own and it will ask
-for the token:
+If you would rather not go back to that page, run the script on its own and it will ask for the token:
 
 ```sh
 ./setup.sh
@@ -30,26 +28,15 @@ It rejects every other argument before downloading or running a release.
 | `--allow-destructive-plan=<sha256>` | Compatibility alias normalized by the bootstrap to `--approve-destructive-plan=<sha256>` before the verified release is launched. |
 | `--telegram-webhook-cutover-from=<https-url>` | Authorizes moving the bot only when Telegram's live current webhook exactly matches this URL. The approval is ephemeral and is never saved or reused. |
 
-`--token=<token>` uses an equals sign. `--token <token>`, bare approval flags, values
-attached to mode flags such as `--resume=true`, and unknown options are not part of the
-public interface.
+`--token=<token>` uses an equals sign. `--token <token>`, bare approval flags, values attached to mode flags such as `--resume=true`, and unknown options are not part of the public interface.
 
-**Prefer leaving the token off the command line.** Every rerun below is written without
-it, because the script asks for it and does not display what you type. A token typed as
-`--token=...` is written into your shell history, where it stays after the run and after
-the token itself has expired; it is also visible in the process list while the script
-runs. Neither is true of the prompt. The `--token=` form still works and is what the
-setup page's own copy-paste command uses, so nothing you were given stops working -- it
-is simply not the form to type by hand.
+**Prefer leaving the token off the command line.** Every rerun below is written without it, because the script asks for it and does not display what you type. A token typed as `--token=...` is written into your shell history, where it stays after the run and after the token itself has expired; it is also visible in the process list while the script runs. Neither is true of the prompt. The `--token=` form still works and is what the setup page's own copy-paste command uses, so nothing you were given stops working -- it is simply not the form to type by hand.
 
-One thing the prompt does not change: the release's own installer still receives the
-token as an argument, so it appears in that process's arguments either way. What the
-prompt removes is the copy that outlives the run.
+One thing the prompt does not change: the release's own installer still receives the token as an argument, so it appears in that process's arguments either way. What the prompt removes is the copy that outlives the run.
 
 ### Resume an Interactive Run
 
-Use `--resume` when a previous run stopped and you are available to answer anything that
-was not saved:
+Use `--resume` when a previous run stopped and you are available to answer anything that was not saved:
 
 ```sh
 ./setup.sh --resume
@@ -57,17 +44,13 @@ was not saved:
 
 ### Reuse Every Saved Answer
 
-Use `--reuse-saved` for a previously configured, incomplete run when you do not want to
-reconfirm existing choices:
+Use `--reuse-saved` for a previously configured, incomplete run when you do not want to reconfirm existing choices:
 
 ```sh
 ./setup.sh --reuse-saved
 ```
 
-This reuses saved company details, project, integration choices, folder IDs, caller ID
-and import settings, and verifies that enabled credentials still exist in Secret
-Manager. It stops instead of guessing if saved state is missing or a new manual,
-security or destructive decision is required.
+This reuses saved company details, project, integration choices, folder IDs, caller ID and import settings, and verifies that enabled credentials still exist in Secret Manager. It stops instead of guessing if saved state is missing or a new manual, security or destructive decision is required.
 
 ### Upgrade an Existing Deployment
 
@@ -77,36 +60,25 @@ Use `--upgrade` to apply the downloaded release to a setup already marked comple
 ./setup.sh --upgrade
 ```
 
-Upgrade restores and validates the saved answers, reruns infrastructure reconciliation
-and registration, and does not repeat checkpointed historical imports or welcome steps.
+Upgrade restores and validates the saved answers, reruns infrastructure reconciliation and registration, and does not repeat checkpointed historical imports or welcome steps.
 It is an in-place reconciliation, not a clean reinstall.
 
 The modes are nested: `--upgrade` includes `--reuse-saved`, which includes `--resume`.
-Pass the strongest single mode you need. Supplying multiple modes is redundant; the
-bootstrap forwards them unchanged and the downloaded installer remains the authority on
-their combination.
+Pass the strongest single mode you need. Supplying multiple modes is redundant; the bootstrap forwards them unchanged and the downloaded installer remains the authority on their combination.
 
-The original token is required on every rerun and is not recovered from saved setup
-state, so have it to hand. Run the command as written and the script will ask for it.
+The original token is required on every rerun and is not recovered from saved setup state, so have it to hand. Run the command as written and the script will ask for it.
 
-If setup reports that a Telegram bot belongs to another deployment, inspect the live
-URL it prints. Only after confirming that the old deployment should relinquish the bot,
-rerun with the exact compare-and-set gate:
+If setup reports that a Telegram bot belongs to another deployment, inspect the live URL it prints. Only after confirming that the old deployment should relinquish the bot, rerun with the exact compare-and-set gate:
 
 ```sh
 ./setup.sh --upgrade --telegram-webhook-cutover-from=<exact-current-https-url>
 ```
 
-An empty, different or subsequently changed live URL invalidates the approval. The flag
-is intentionally excluded from saved-answer state so a later rerun cannot repeat an old
-cutover decision.
+An empty, different or subsequently changed live URL invalidates the approval. The flag is intentionally excluded from saved-answer state so a later rerun cannot repeat an old cutover decision.
 
 ## Approve a Reviewed Deletion Manifest
 
-Upgrade saves and checks a Terraform plan before applying it. Protected BigQuery
-resources, storage buckets and secrets cannot be approved for deletion through either
-approval flag. Other deletions stop setup and print the saved plan path plus a canonical
-manifest SHA-256.
+Upgrade saves and checks a Terraform plan before applying it. Protected BigQuery resources, storage buckets and secrets cannot be approved for deletion through either approval flag. Other deletions stop setup and print the saved plan path plus a canonical manifest SHA-256.
 
 Review that saved plan, then rerun the same command with the exact printed hash:
 
@@ -115,36 +87,21 @@ Review that saved plan, then rerun the same command with the exact printed hash:
   --approve-destructive-plan=<printed-lowercase-sha256>
 ```
 
-The hash value must be exactly 64 lowercase hexadecimal characters. A bare flag, an
-empty value, the wrong length or uppercase characters are rejected by the downloaded
-installer. The approval applies only to that exact manifest: if an address, action or
-resource identity changes, the hash changes and setup stops for a new review.
+The hash value must be exactly 64 lowercase hexadecimal characters. A bare flag, an empty value, the wrong length or uppercase characters are rejected by the downloaded installer. The approval applies only to that exact manifest: if an address, action or resource identity changes, the hash changes and setup stops for a new review.
 
-The legacy spelling is equivalent. The bootstrap normalizes it to the canonical spelling,
-so it also works with releases that expose only the canonical public option:
+The legacy spelling is equivalent. The bootstrap normalizes it to the canonical spelling, so it also works with releases that expose only the canonical public option:
 
 ```sh
 ./setup.sh --upgrade \
   --allow-destructive-plan=<printed-lowercase-sha256>
 ```
 
-Do not supply either approval flag before setup has printed the hash for the plan you
-reviewed.
+Do not supply either approval flag before setup has printed the hash for the plan you reviewed.
 
 ## Release Compatibility
 
-These options do not select a release version. The setup service chooses the package,
-and the bootstrap verifies its published SHA-256 before extracting anything.
+These options do not select a release version. The setup service chooses the package, and the bootstrap verifies its published SHA-256 before extracting anything.
 
-Before launch, the bootstrap checks the downloaded
-`deployment/scripts/setup.sh` for every requested mode. Either destructive-plan spelling
-also requires that release to advertise hash-bound destructive-plan support. Capability
-detection is based on the downloaded script, not on a minimum or maximum SemVer: a lower
-reported version that contains the capability is forwarded, while a higher reported
-version without it is rejected.
+Before launch, the bootstrap checks the downloaded `deployment/scripts/setup.sh` for every requested mode. Either destructive-plan spelling also requires that release to advertise hash-bound destructive-plan support. Capability detection is based on the downloaded script, not on a minimum or maximum SemVer: a lower reported version that contains the capability is forwarded, while a higher reported version without it is rejected.
 
-If any requested option is unsupported, the bootstrap reports the downloaded release
-version and exits without running its setup script. This can occur when the public
-bootstrap is updated before a compatible platform release is promoted. Wait for the
-compatible release, then rerun the same command; do not remove a safety flag merely to
-bypass the compatibility check.
+If any requested option is unsupported, the bootstrap reports the downloaded release version and exits without running its setup script. This can occur when the public bootstrap is updated before a compatible platform release is promoted. Wait for the compatible release, then rerun the same command; do not remove a safety flag merely to bypass the compatibility check.

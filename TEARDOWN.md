@@ -57,8 +57,7 @@ Click in the terminal below and run:
 ./teardown.sh
 ```
 
-The script asks for your domain, then for your teardown token. Paste the token from your
-teardown link at the prompt; it is not shown on screen as you paste it.
+The script asks for your domain, then for your teardown token. Paste the token from your teardown link at the prompt; it is not shown on screen as you paste it.
 
 The script will:
 1. Ask you to confirm by typing the domain name
