@@ -31,20 +31,16 @@
 #
 # The estate's other repositories also run a doc-links job, which resolves
 # Markdown links against the two link conventions using a checker that lives in
-# corco-tools and arrives as a composite action. This repository cannot: it is
-# the one public repository in the estate, and GitHub allows access to a private
-# repository's actions "only from private repositories". The job was added here
-# and failed at Set up job with "Unable to resolve action 'corcoai/corco-tools',
-# not found" -- before any step, with the organization Actions access setting
-# already correct and identical calls succeeding from the private repositories.
-# It is removed rather than left red, because a gate that cannot pass teaches
-# people to ignore red faster than one that fails honestly.
-#
-# The two tracked documents here are therefore checked by hand, by running
-# corco-docs-links against this checkout from a corco-tools working copy. Making
-# that automatic means either vendoring the checker into a public repository or
-# publishing it, and both are decisions about what this repository exposes
-# rather than about CI. SD-161 carries that decision.
+# corco-tools and arrives as a composite action. This repository cannot use that
+# action: it is the one public repository in the estate, and GitHub allows a
+# private repository's actions "only from private repositories", so referencing
+# corcoai/corco-tools fails at Set up job, before any step runs. The checker is
+# therefore vendored byte-identical under testing/corco_tools/ -- three
+# standard-library files copied from corcoai/corco-tools at the commit
+# testing/corco_tools.provenance.json names -- and the doc-links job below runs
+# that copy directly. corco-tools' test_doc_links_installer_copy.py fails when
+# the copy drifts from its source, so a checker change that is not re-copied is
+# caught there rather than silently diverging.
 #
 # No credential of any kind, for the reason corco-platform gives: a pull request
 # job that holds one hands it to whatever a contributor chooses to push.
@@ -72,6 +68,8 @@ concurrency:
 env:
   SHELLCHECK_VERSION: 0.11.0
   SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+  # Matches corco-tools' pin, which is what the vendored checker requires.
+  DOC_LINKS_PYTHON_VERSION: "3.12"
 
 jobs:
   shellcheck:
@@ -134,3 +132,24 @@ jobs:
         # rather than discovered by a glob, so that a test file which stops being run
         # shows up as a missing step rather than as silence.
         run: bash testing/test-teardown-token-transport.sh
+
+  doc-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.DOC_LINKS_PYTHON_VERSION }}
+
+      - name: Resolve every documentation link
+        # The vendored copy under testing/corco_tools/, not the corco-tools
+        # composite action, because a private repository's action cannot run in
+        # this public one (header). PYTHONPATH is the folder holding the
+        # corco_tools package, so the module and its relative imports resolve
+        # exactly as the action runs them; --strict matches every other
+        # repository in the estate. No install: the checker is standard library
+        # only, which is why it can be vendored at all.
+        run: |
+          set -euo pipefail
+          CORCO_REPO_ROOT="$GITHUB_WORKSPACE" PYTHONPATH="$GITHUB_WORKSPACE/testing" python -m corco_tools.check_doc_links --strict

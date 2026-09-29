@@ -1,0 +1,21 @@
+{
+  "files": [
+    {
+      "file": "__init__.py",
+      "sha256": "e5ac8d8b5da25b6495d55984a0ce079df9eb0fb910217236130b9f8f419b4769"
+    },
+    {
+      "file": "check_doc_links.py",
+      "sha256": "8651cfc73968dabbb89b5ee197648e65612f3dab5ef132f825160f33dd1e0cc0"
+    },
+    {
+      "file": "repo.py",
+      "sha256": "d43a216608c733173dacb8657d9e06277526d1eefe29fdee2b21273e77c04de6"
+    }
+  ],
+  "source_repository": "corcoai/corco-tools",
+  "source_dir": "corco_tools",
+  "source_commit": "aec74fb1b52a0a79bad39112bf8e6948107f0dcf",
+  "copied_on": "2026-09-29",
+  "note": "Vendored byte-identical. Never edit this copy: change corco-tools, re-copy, update sha256 and source_commit together. corco-tools test_doc_links_installer_copy.py enforces it."
+}
