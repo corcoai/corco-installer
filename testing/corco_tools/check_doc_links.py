@@ -40,7 +40,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from .repo import RepoRootError, repo_root
 
@@ -93,6 +93,39 @@ FENCE = re.compile(r"^\s*(?:```|~~~)")
 
 # Targets that name something other than a path in this filesystem.
 EXTERNAL = ("http://", "https://", "mailto:", "tel:", "ftp://", "#")
+
+#: Whitespace that cannot stand raw in a link target. CommonMark ends the target at the
+#: first one, so GitHub shows the whole link as literal text. This one pattern is both the
+#: rule check_file reports and the first thing encode_target removes, which is what keeps
+#: a target the checker proposes from being one the checker rejects (CORCO-2104).
+RAW_WHITESPACE = re.compile(r"\s")
+
+#: What encode_target escapes: the whitespace above, plus the four characters that would
+#: change what the target means if left raw -- "%" starts an escape, "#" starts the
+#: fragment, and "(" ")" can end the link early. decode_target is the exact inverse.
+_ESCAPED = re.compile(r"[%#()]|" + RAW_WHITESPACE.pattern)
+
+
+def encode_target(path: str) -> str:
+    """Spell a filesystem path as a link target the checker itself accepts.
+
+    Every target the checker proposes to a reader, or writes with --fix, goes through here.
+    A path is decoded to look it up (decode_target) and must be encoded again to be shown:
+    printing the decoded path hands back a raw space, which the rule above rejects. Only
+    the characters that must change do, so slashes and accents stay readable.
+    """
+    return _ESCAPED.sub(lambda match: quote(match.group(0), safe=""), path)
+
+
+def decode_target(target: str) -> tuple[str, str]:
+    """Split a link target into the filesystem path it names and its fragment as written.
+
+    The fragment is split off before decoding, so %23 stays part of the filename while a
+    real # starts the fragment. The path is decoded exactly once, the inverse of
+    encode_target.
+    """
+    bare, _, fragment = target.partition("#")
+    return unquote(bare), fragment
 
 
 def strip_code(text: str) -> str:
@@ -196,7 +229,7 @@ def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
     # literal text, and LINK below never matches it. Report it here, or nothing will.
     linked = {match.start() for match in LINK.finditer(text)}
     for match in LINK_SHAPED.finditer(text):
-        if match.start() in linked or not re.search(r"\s", match.group(1)):
+        if match.start() in linked or not RAW_WHITESPACE.search(match.group(1)):
             continue
         findings.append(
             Finding(
@@ -231,7 +264,7 @@ def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
             continue
         # Strip the URL fragment before decoding: %23 belongs to the filename.
         # Keep target encoded for diagnostics; only filesystem lookup is decoded.
-        bare = unquote(target.split("#", 1)[0])
+        bare, _fragment = decode_target(target)
         if not bare:
             continue
 
@@ -272,7 +305,8 @@ def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
                         rel,
                         line,
                         target,
-                        "cross-repo link is %s; expected %s%s" % (how, "../" * expected, rest),
+                        "cross-repo link is %s; expected %s%s"
+                        % (how, "../" * expected, encode_target(rest)),
                         error=True,
                     )
                 )
@@ -293,7 +327,7 @@ def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
             findings.append(Finding(rel, line, target, "relative target does not exist", error=True))
         else:
             try:
-                canonical = "/" + str(resolved.relative_to(root.resolve()))
+                canonical = "/" + encode_target(str(resolved.relative_to(root.resolve())))
             except ValueError:
                 canonical = "a path outside the repository"
             findings.append(
@@ -367,12 +401,12 @@ def fix_relative(path: Path, root: Path) -> list[str]:
         target = match.group(2)
         if target.startswith(EXTERNAL) or target.startswith(("/", "../")):
             return match.group(0)
-        bare, _, fragment = target.partition("#")
+        bare, fragment = decode_target(target)
         if not bare:
             return match.group(0)
         try:
             resolved = (path.parent / bare).resolve()
-            canonical = "/" + str(resolved.relative_to(resolved_root))
+            canonical = "/" + encode_target(str(resolved.relative_to(resolved_root)))
         except (ValueError, OSError):
             return match.group(0)
         if not resolved.exists():
