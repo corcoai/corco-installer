@@ -3,7 +3,7 @@
     {
       "file": "teardown.sh",
       "source_path": "deployment/scripts/teardown.sh",
-      "sha256": "97495ca88b84cc434fef4433d2fe09335898bed78235861ba68b07ab1489f2cb"
+      "sha256": "48a9ee6b2cbf3c6f81d18dd1281daa3d611b0796385648809b25dbfeaae402b3"
     },
     {
       "file": "TEARDOWN.md",
@@ -12,7 +12,7 @@
     }
   ],
   "source_repository": "corcoai/corco-platform",
-  "source_commit": "b02edabc6716931978fc8b11d1e521b2a7cf34c3",
+  "source_commit": "f18f88de5c370e99272e14ef0c7db8d17239831e",
   "copied_on": "2026-10-17",
   "note": "Copied byte-identical. Never edit these copies: change corco-platform, push it, re-copy, and update each sha256 and source_commit together. testing/test-teardown-provenance.py here and corco-platform's testing/test-installer-teardown-copy.py enforce it."
 }

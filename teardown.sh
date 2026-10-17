@@ -886,7 +886,7 @@ while [[ $# -gt 0 ]]; do
         # so a caller cannot supply a token this way by accident: a script's own stdin
         # otherwise carries the operator's typed confirmations further down.
         --token-stdin)
-            IFS= read -r TEARDOWN_TOKEN || true
+            IFS= read -rs TEARDOWN_TOKEN || true
             shift
             ;;
         --delete-data)
