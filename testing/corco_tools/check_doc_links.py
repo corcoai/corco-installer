@@ -17,7 +17,10 @@ of them looked wrong. The correct prefix is one ../ per directory level, plus on
 A depth error is checkable without the sibling repository being present, which is what
 makes this a CI gate rather than a workspace-only script: the ../ count is a property of
 where the file sits, and CI checks out one repository. When the siblings do happen to be
-checked out -- an operator's workspace -- the target's existence is checked as well.
+checked out -- an operator's workspace -- the target's existence is checked as well, from
+the main checkout and from any linked worktree of it alike: the estate is the folder that
+holds the main checkout, read from Git (corco_tools.repo.CheckoutLayout), never the folder
+that happens to hold the checkout being checked.
 
 Two severities, because a gate that arrives red teaches people to ignore red. A link
 that does not resolve is an error and fails the run. A same-repo relative link that does
@@ -42,26 +45,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from .repo import RepoRootError, repo_root
-
-#: The repositories of the corcoai estate, as the workspace CLAUDE.md lists them. A ../
-#: target whose first segment is one of these is a cross-repository link and is measured
-#: against the sibling-relative convention; anything else beginning with ../ is a file
-#: reaching outside its own repository for something that is not a sibling checkout,
-#: which is reported rather than guessed at.
-ESTATE_REPOS = frozenset(
-    {
-        "corco-platform",
-        "corco-voyages",
-        "corco-installer",
-        "corco-tools",
-        "corco-gtm",
-        "corco-web",
-        "corco-corporate",
-        "corco-sheets-ai",
-        "corco-prod",
-    }
-)
+from .repo import ESTATE_REPOS, CheckoutLayout, RepoRootError, repo_root
 
 #: Generated aggregates are rebuilt from their sources. Auditing one reports every source
 #: defect a second time and adds its own staleness on top, so the sources are the subject.
@@ -213,8 +197,12 @@ def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
-def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
-    """Every convention violation in one document."""
+def check_file(path: Path, root: Path, workspace: CheckoutLayout | None) -> list[Finding]:
+    """Every convention violation in one document.
+
+    ``workspace`` is the layout of ``root`` when sibling checkouts sit beside its main
+    checkout, and None when only the shape of a cross-repository link can be checked.
+    """
     rel = str(path.relative_to(root))
     try:
         raw = path.read_text(encoding="utf-8")
@@ -312,8 +300,10 @@ def check_file(path: Path, root: Path, workspace: Path | None) -> list[Finding]:
                 )
                 continue
             # The depth is right. Existence is only knowable when the sibling is
-            # checked out, which CI never is and a workspace usually is.
-            if workspace is not None and not (path.parent / bare).exists():
+            # checked out, which CI never is and a workspace usually is. The link is
+            # followed from the main checkout, where it was written to work: from a
+            # worktree, path.parent / bare lands beside the worktree, not in the estate.
+            if workspace is not None and not workspace.on_disk(workspace.logical(path.parent / bare)).exists():
                 findings.append(
                     Finding(rel, line, target, "sibling checkout has no such file", error=True)
                 )
@@ -421,17 +411,24 @@ def fix_relative(path: Path, root: Path) -> list[str]:
     return changed
 
 
-def detect_workspace(root: Path) -> Path | None:
-    """The estate workspace, if this repository is checked out inside one.
+def detect_workspace(root: Path) -> CheckoutLayout | None:
+    """The layout of ``root`` in the estate workspace, if its main checkout sits in one.
 
-    A sibling checkout of any other estate repository is the evidence. Without one,
-    cross-repository targets are unresolvable and only their shape is checked.
+    A checkout of any other estate repository beside the main checkout is the evidence;
+    without one, cross-repository targets are unresolvable and only their shape is
+    checked. Git says where the main checkout is, so a linked worktree finds the same
+    siblings as its main checkout (CORCO-2841). Where Git cannot place ``root`` -- no
+    checkout, or ``CORCO_REPO_ROOT`` naming a folder that is not a checkout's top level --
+    ``root`` is read as its own main checkout, as before Git was asked.
     """
-    parent = root.parent
-    for name in ESTATE_REPOS:
-        if name != root.name and (parent / name).is_dir():
-            return parent
-    return None
+    root = root.resolve()
+    try:
+        layout = CheckoutLayout.read(root)
+    except ValueError:
+        layout = None
+    if layout is None or layout.checkout != root:
+        layout = CheckoutLayout(root, root, root.name if root.name in ESTATE_REPOS else None)
+    return layout if layout.siblings() else None
 
 
 def main() -> int:
