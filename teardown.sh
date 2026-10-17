@@ -40,10 +40,14 @@
 #     tree is two levels up;
 #   - anywhere else, this is the copy at the root of a corco-installer clone, and the tree
 #     is the corco-installer/ folder that setup.sh extracts beside it, present or not.
-# deployment/config/config.sh is not sourced: it takes the root from `git rev-parse` of
-# the working directory, which inside a corco-installer clone is the clone, not the
-# release. CORCO_PLATFORM_ROOT overrides both.
+# deployment/config/config.sh is not sourced: the copy at the root of a corco-installer
+# clone finds one only inside the release that setup.sh extracts, and must still run, and
+# say what it cannot do, before that. CORCO_PLATFORM_ROOT overrides both.
+#
+# The directory the operator ran this from is kept too, for the commands the summary prints.
+INVOCATION_DIR="$(pwd -P)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEARDOWN_SCRIPT="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 PLATFORM_ROOT="${CORCO_PLATFORM_ROOT:-}"
 if [ -z "$PLATFORM_ROOT" ]; then
     case "$SCRIPT_DIR" in
@@ -2107,6 +2111,68 @@ if [ "$RESTORE_ORG_POLICY" == "true" ]; then
 fi
 echo ""
 
+# The reinstall and wipe commands below are ones the operator can paste where they ran
+# this, so each is built from this file's own place, as PLATFORM_ROOT is at the top:
+#   - in deployment/scripts/, setup.sh beside this file is the installer. It takes
+#     --domain, and it finds its tree from its own path, so it runs from any directory;
+#   - anywhere else, setup.sh beside this file is the corco-installer bootstrap. It takes
+#     no --domain, because the setup token names the domain, and it unpacks the release
+#     into the directory it runs from, so it runs only from this file's directory.
+# --resume is offered only while the setup state it resumes from is still on disk, so
+# never after --delete-config. Either setup.sh asks for the setup token itself.
+
+# operator_path FILE: FILE as the operator types it from INVOCATION_DIR, quoted for the shell.
+operator_path() {
+    local directory
+    local file
+    directory="$(cd "$(dirname "$1")" && pwd -P)" || return 1
+    file="$directory/$(basename "$1")"
+    case "$file" in
+        "$INVOCATION_DIR"/*) printf './%q' "${file#"$INVOCATION_DIR"/}" ;;
+        *) printf '%q' "$file" ;;
+    esac
+}
+
+# reinstall_command RESUME: the setup command for the layout this file runs in, with
+# --resume when RESUME is true. It fails when no setup.sh sits beside this file.
+reinstall_command() {
+    local resume_flag=""
+    local bootstrap_dir
+    if [ "$1" = "true" ]; then
+        resume_flag=" --resume"
+    fi
+    [ -f "$SCRIPT_DIR/setup.sh" ] || return 1
+    case "$SCRIPT_DIR" in
+        */deployment/scripts)
+            printf '%s --domain=%q%s' "$(operator_path "$SCRIPT_DIR/setup.sh")" "$DOMAIN" "$resume_flag"
+            ;;
+        *)
+            bootstrap_dir="$(cd "$SCRIPT_DIR" && pwd -P)" || return 1
+            if [ "$bootstrap_dir" = "$INVOCATION_DIR" ]; then
+                printf './setup.sh%s' "$resume_flag"
+            else
+                printf 'cd %q && ./setup.sh%s' "$bootstrap_dir" "$resume_flag"
+            fi
+            ;;
+    esac
+}
+
+# print_reinstall_step RESUME NOTE: step 2 of the reinstall instructions.
+print_reinstall_step() {
+    local command
+    if command="$(reinstall_command "$1")"; then
+        echo "  2. Run: $command"
+        echo "     $2"
+    else
+        echo "  2. Open your setup link and run setup again: no setup.sh sits beside this teardown.sh"
+    fi
+}
+
+SETUP_STATE_SURVIVES=false
+if [ "$DELETE_CONFIG" != "true" ] && [ -f "$STATE_FILE" ]; then
+    SETUP_STATE_SURVIVES=true
+fi
+
 PRESERVED_ITEMS=""
 for preserved in "data:$DATA_OUTCOME" "secrets:$SECRETS_OUTCOME" "configuration:$CONFIG_OUTCOME"; do
     case "${preserved#*:}" in
@@ -2127,7 +2193,7 @@ if [ "$DELETE_DATA" == "true" ] && [ "$DELETE_SECRETS" == "true" ] && [ "$DELETE
     echo ""
     echo "To reinstall from scratch:"
     echo "  1. Complete manual DWD cleanup (see above)"
-    echo "  2. Run setup.sh with a new token"
+    print_reinstall_step false "Use a new setup token when setup.sh asks for one."
 else
     if [ -n "$PRESERVED_ITEMS" ]; then
         echo -e "${GREEN}Safe teardown complete.${NC} Preserved for reinstall: $PRESERVED_ITEMS."
@@ -2137,9 +2203,9 @@ else
     echo ""
     echo "To reinstall:"
     echo "  1. Complete manual DWD cleanup (see above)"
-    echo "  2. Run: ./setup.sh --domain=$DOMAIN --resume"
+    print_reinstall_step "$SETUP_STATE_SURVIVES" "setup.sh asks for your setup token."
     echo ""
     echo "To fully wipe later:"
-    echo "  ./teardown.sh $DOMAIN --all"
+    echo "  $(operator_path "$TEARDOWN_SCRIPT") $(printf '%q' "$DOMAIN") --all"
 fi
 echo ""
