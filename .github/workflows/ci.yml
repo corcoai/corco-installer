@@ -16,18 +16,21 @@
 # until `release` is moved back. Shellcheck carries that whole weight, over
 # every tracked script.
 #
-# Two of those scripts are this repository's subject: setup.sh, the bootstrap,
-# and teardown.sh. The third, deployment/scripts/setup.sh, is neither. It is a
-# stale snapshot of corco-platform's script of that path -- it still names the
-# pre-split org benedikt-waganari and predates the project-reuse and project-id
-# length handling -- and the bootstrap does not run it. What the bootstrap runs
-# is corco-installer/deployment/scripts/setup.sh *inside the directory it just
-# extracted the tarball into*, which corco-tools packages out of corco-platform
-# and corco-platform's own CI gates. The paths coincide; the files do not. This
-# copy ships nowhere and is read by nothing, so gating it measures a file no
-# customer will ever execute while implying the real one is covered here. It is
-# to be deleted, which SD-160 carries; the enumeration below needs no change
-# when it goes, since it counts tracked scripts rather than naming them.
+# Two scripts are this repository's subject: setup.sh, the bootstrap, and
+# teardown.sh. teardown.sh and the TEARDOWN.md tutorial beside it are not
+# written here. They are byte-identical copies of corco-platform's
+# deployment/scripts/teardown.sh and deployment/docs/TEARDOWN_TUTORIAL.md, which
+# own them, and teardown.provenance.json records the source commit and the
+# sha256 of each. The teardown button runs the copy here from a fresh clone; the
+# release tarball carries the same script as deployment/scripts/teardown.sh, so
+# one script serves both routes. A copy edited here in place fails
+# testing/test-teardown-provenance.py below, and a copy that differs from its
+# source fails corco-platform's own CI, which reads this repository. Change the
+# source there, then copy it here; never edit either file here.
+#
+# What the bootstrap runs after it has unpacked the release is
+# corco-installer/deployment/scripts/setup.sh inside that directory, which is
+# packaged out of corco-platform and gated by corco-platform's own CI.
 #
 # The estate's other repositories also run a doc-links job, which resolves
 # Markdown links against the two link conventions using a checker that lives in
@@ -132,6 +135,13 @@ jobs:
         # rather than discovered by a glob, so that a test file which stops being run
         # shows up as a missing step rather than as silence.
         run: bash testing/test-teardown-token-transport.sh
+
+      - name: Verify the vendored teardown files
+        # teardown.sh and TEARDOWN.md must still match the sha256 that
+        # teardown.provenance.json records, so an edit made here in place fails
+        # rather than starting a second copy (header). Standard library only, on
+        # the runner's own python3.
+        run: python3 testing/test-teardown-provenance.py
 
   doc-links:
     runs-on: ubuntu-latest
