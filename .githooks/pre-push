@@ -1,0 +1,16 @@
+#!/bin/sh
+# Pre-push (CORCO-3140). This repository's core.hooksPath=.githooks replaces the global
+# hooks folder, so this file calls the shared check that lives there. A rebase, a
+# cherry-pick, git am or --no-verify makes a commit without .githooks/pre-commit; the
+# check runs every commit the push sends that no remote holds yet through that hook,
+# oldest first, and the first failing commit refuses the push. It then runs the global
+# pre-push. The program is "Git hooks/check_pushed_commits.py" in the Information
+# Security repository, found through the global core.hooksPath; when it is missing or
+# cannot run, the push is refused, as this repository's pre-commit refuses without gitleaks.
+hooks=$(git config --global --includes --type=path --get core.hooksPath)
+if [ ! -x "$hooks/repository-pre-push" ]; then
+    echo "pre-push: no shared check at '$hooks/repository-pre-push' (the global core.hooksPath), so the push was refused" >&2
+    echo "pre-push: it is in the Information Security repository's 'Git hooks' folder: set the global core.hooksPath to that folder, or bring its checkout up to date with git pull --ff-only, and push again" >&2
+    exit 1
+fi
+exec "$hooks/repository-pre-push" "$@"
