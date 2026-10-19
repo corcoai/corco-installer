@@ -10,12 +10,12 @@
     },
     {
       "file": "repo.py",
-      "sha256": "b13407e2867b4139c7303d0f939aabad9b93feba0c613394f0675f44c7c36a89"
+      "sha256": "e72179402241c19476d0328f97c5e4632b526ff952159ad978a9e54e1f6c0f24"
     }
   ],
   "source_repository": "corcoai/corco-tools",
   "source_dir": "corco_tools",
-  "source_commit": "635916bddf124defc66c4159713df3b72c7387db",
-  "copied_on": "2026-10-17",
+  "source_commit": "caad97dc63570abafb39d266fa38b889f437e17b",
+  "copied_on": "2026-10-18",
   "note": "Vendored byte-identical. Never edit this copy: change corco-tools, re-copy, update sha256 and source_commit together. corco-tools test_doc_links_installer_copy.py enforces it."
 }

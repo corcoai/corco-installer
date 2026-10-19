@@ -7,8 +7,9 @@ is the whole class of bug this module exists to prevent:
 
   * where the tooling lives    - `Path(__file__).parent`, for the tool's own
                                  assets (the mermaid configs, the shell scripts)
-  * which repository it acts on - this module, resolved from the environment or
-                                 from the current directory
+  * which repository it acts on - this module, resolved from the environment,
+                                 from the target the caller names, or from the
+                                 current directory
 
 Nothing here may look at the package's own location.
 
@@ -64,12 +65,15 @@ class RepoRootError(RuntimeError):
     """The repository to operate on could not be determined."""
 
 
-def repo_root() -> Path:
+def repo_root(start: Path | None = None) -> Path:
     """Return the root of the repository this invocation should operate on.
 
     `CORCO_REPO_ROOT` wins, so a caller (the console wrappers, a CI job, a cron
-    entry) can be explicit. Otherwise the enclosing git checkout of the current
-    directory, which is what a person running the command in a repo means.
+    entry) can be explicit. Otherwise the enclosing git checkout of ``start``,
+    a folder or a file in it. A caller that knows its target names it here, so
+    the answer does not depend on where the command was run from (CORCO-3106).
+    Without ``start``, the current directory, which is what a person running
+    the command in a repo means.
     """
     explicit = os.environ.get("CORCO_REPO_ROOT")
     if explicit:
@@ -78,18 +82,21 @@ def repo_root() -> Path:
             raise RepoRootError(f"CORCO_REPO_ROOT is not a directory: {path}")
         return path.resolve()
 
+    folder = Path.cwd() if start is None else Path(start).resolve()
+    if not folder.is_dir():
+        folder = folder.parent
     try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607  git intentionally resolved from PATH
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        toplevel = completed.stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+        toplevel = run_git(folder, "rev-parse", "--show-toplevel").stdout.strip()
+    except OSError:
         toplevel = ""
 
     if not toplevel:
+        if start is not None:
+            raise RepoRootError(
+                f"{Path(start).resolve()} is in no Git repository checkout, so there is "
+                "no repository to operate on. Name a file inside a checkout, or set "
+                "CORCO_REPO_ROOT to the repository's root."
+            )
         raise RepoRootError(
             "cannot tell which repository to operate on. Run this from inside a "
             "repository checkout, or set CORCO_REPO_ROOT to its root."
