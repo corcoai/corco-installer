@@ -24,6 +24,10 @@ directory, and the estate is the main checkout's parent. The PDF link repair and
 the link check both read it here (CORCO-2828, CORCO-2833, CORCO-2841), so a
 worktree accepts and refuses exactly the links its main checkout does.
 
+The third question is what the commit being made holds. `StagedIndex` and
+`staged_changes` read it from the index for the pre-commit checks, the render
+check and the link check alike, so neither keeps its own reader (CORCO-3188).
+
 Standard library only: the doc-links action and the copy vendored in
 corco-installer run check_doc_links, which imports this module, without
 installing anything.
@@ -115,6 +119,69 @@ def run_git(checkout: Path, *arguments: str) -> subprocess.CompletedProcess:
         ["git", "-C", str(checkout), *arguments],  # noqa: S607  git intentionally resolved from PATH
         capture_output=True, text=True, check=False,
     )
+
+
+class GitError(RuntimeError):
+    """A git command could not run or failed, so what it would have said is unknown: never a pass."""
+
+
+def git_output(checkout: Path, *arguments: str, stdin: bytes | None = None) -> bytes:
+    """Run one git command in ``checkout`` and return its standard output; GitError when it fails."""
+    try:
+        completed = subprocess.run(  # noqa: S603  fixed argv, no shell; paths come from git itself
+            ["git", "-C", str(checkout), *arguments],  # noqa: S607  git intentionally resolved from PATH
+            input=stdin, capture_output=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        detail = (getattr(error, "stderr", b"") or b"").decode(errors="replace").strip()
+        raise GitError(f"git {arguments[0]} failed in {checkout}: {detail or error}") from error
+    return completed.stdout
+
+
+def split_z(output: bytes) -> list[str]:
+    """The paths of NUL-separated git output (-z), in order."""
+    return [item.decode("utf-8", errors="surrogateescape") for item in output.split(b"\0") if item]
+
+
+class StagedIndex:
+    """Tracked paths and their staged contents, read from the index: what the commit being made will hold.
+
+    The pre-commit checks read this, never the disk, so a fix made on disk and not staged
+    still fails (corco-docs-exports --staged, corco-docs-links --staged).
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.tracked = set(split_z(git_output(root, "ls-files", "-z", "--cached")))
+
+    def read(self, paths: list[str]) -> dict[str, bytes | None]:
+        """The staged bytes of each path, None for a path the index does not hold."""
+        wanted = [path for path in paths if path in self.tracked]
+        contents: dict[str, bytes | None] = {path: None for path in paths}
+        if not wanted:
+            return contents
+        if any("\n" in path for path in wanted):
+            raise GitError("a staged path contains a newline, which git cat-file --batch cannot address")
+        # One process for every blob rather than one per file: a re-export commit
+        # stages hundreds of renders.
+        output = git_output(self.root, "cat-file", "--batch", stdin="".join(f":{path}\n" for path in wanted).encode())
+        position = 0
+        for path in wanted:
+            end = output.index(b"\n", position)
+            header = output[position:end].split()
+            position = end + 1
+            if header[-1] == b"missing":
+                continue
+            size = int(header[2])
+            contents[path] = output[position:position + size]
+            position += size + 1
+        return contents
+
+
+def staged_changes(root: Path) -> list[tuple[str, str]]:
+    """(status letter, path) of every staged change; a rename reads as a deletion plus an addition."""
+    fields = split_z(git_output(root, "diff", "--cached", "--name-status", "-z", "--no-renames"))
+    return list(zip(fields[0::2], fields[1::2], strict=True))
 
 
 def remote_name(url: str) -> str | None:

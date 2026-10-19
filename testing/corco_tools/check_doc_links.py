@@ -33,19 +33,42 @@ Two kinds of target are reported as they stand, without being resolved. A file:/
 an absolute path on the machine that wrote it, which no other host or reader can open. A
 target holding a raw space is not a link to CommonMark at all -- GitHub shows it as
 literal text -- and it escaped this check entirely until the check looked for it.
+
+A ../ target is read by where it lands, not by how it starts. One whose first segment
+after the ../ run names an estate repository is a cross-repository link. One that stays
+inside the repository, deployment/x.md linking ../docs/y.md, is a same-repo relative
+link like any other; it was reported as leaving the repository until CORCO-3188. Only one
+that climbs above the repository root without naming a sibling is reported as that.
+
+Two modes. Without --staged every tracked document is read from disk, which is what CI
+runs. With --staged the index is read instead, which is what a pre-commit hook runs:
+each staged document, or every tracked one when the commit deletes a path, since a
+deletion can break a link in a document the commit leaves alone. A target is looked up
+in the index as well, so a link to a file that exists on disk but is not staged fails.
+A cross-repository target is checked for its shape only, as CI checks it, so a sibling
+checkout that is behind its origin cannot refuse a commit CI would accept.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import posixpath
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote
 
-from .repo import ESTATE_REPOS, CheckoutLayout, RepoRootError, repo_root
+from .repo import (
+    ESTATE_REPOS,
+    CheckoutLayout,
+    GitError,
+    RepoRootError,
+    StagedIndex,
+    repo_root,
+    staged_changes,
+)
 
 #: Generated aggregates are rebuilt from their sources. Auditing one reports every source
 #: defect a second time and adds its own staleness on top, so the sources are the subject.
@@ -69,6 +92,9 @@ LINK_SHAPED = re.compile(r"\[[^\]\n]*\]\(([^)\n]*)\)")
 
 # A cross-repository link, split so the ../ run can be counted and replaced.
 CROSS_REPO = re.compile(r"(\]\()((?:\.\./)+)([^)\s]+)(\))")
+
+# A ../ target split into its ../ run and the rest.
+CROSS_REPO_HEAD = re.compile(r"((?:\.\./)+)(.*)", re.S)
 
 # Any inline link, split so the target alone can be replaced.
 LINK_TARGET = re.compile(r"(\]\()([^)\s]+)((?:\s+\"[^\"]*\")?\))")
@@ -174,6 +200,91 @@ def markdown_files(root: Path):
                 yield Path(dirpath) / name
 
 
+class DiskTree:
+    """Documents and targets as they are on disk: what a full run and --fix read."""
+
+    def read(self, path: Path) -> str:
+        return path.read_text(encoding="utf-8")
+
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def resolve(self, path: Path) -> Path:
+        return path.resolve()
+
+
+class StagedTree:
+    """Documents and in-repository targets as the index holds them: what the commit will hold.
+
+    A path under ``root`` exists when the index tracks it or a file below it. A path
+    outside ``root`` is in no commit this check can see, so it is looked up on disk.
+    Paths are normalised by their spelling, never through the disk: the index holds no
+    symbolic links to follow.
+    """
+
+    def __init__(self, root: Path, index: StagedIndex | None = None) -> None:
+        self.root = Path(os.path.normpath(root))
+        self.index = index if index is not None else StagedIndex(self.root)
+        self.present = {"."}
+        for tracked in self.index.tracked:
+            self.present.add(tracked)
+            self.present.update(str(parent) for parent in PurePosixPath(tracked).parents)
+        self.texts: dict[str, bytes | None] = {}
+
+    def _relative(self, path: Path) -> str | None:
+        normalised = Path(os.path.normpath(path))
+        if not normalised.is_relative_to(self.root):
+            return None
+        return normalised.relative_to(self.root).as_posix()
+
+    def load(self, paths: list[Path]) -> None:
+        """Read the staged text of every path in one git process, before the documents are checked."""
+        wanted = [relative for relative in map(self._relative, paths) if relative is not None and relative not in self.texts]
+        self.texts.update(self.index.read(wanted))
+
+    def read(self, path: Path) -> str:
+        relative = self._relative(path)
+        if relative is None:
+            raise OSError(f"{path} is outside {self.root}")
+        if relative not in self.texts:
+            self.load([path])
+        data = self.texts[relative]
+        if data is None:
+            raise OSError(f"{relative} is not in the index")
+        return data.decode("utf-8")
+
+    def exists(self, path: Path) -> bool:
+        relative = self._relative(path)
+        if relative is None:
+            return Path(os.path.normpath(path)).exists()
+        return relative in self.present
+
+    def resolve(self, path: Path) -> Path:
+        return Path(os.path.normpath(path))
+
+
+#: How parent_link reads a ../ target.
+SIBLING, OUTSIDE = "sibling", "outside"
+
+
+def parent_link(document: str, bare: str) -> str | None:
+    """Read a relative target from ``document``, a repository path: SIBLING, OUTSIDE or None.
+
+    SIBLING: the first segment after the ../ run names an estate repository, so it is a
+    cross-repository link. Read first, so a sibling link one ../ short is still measured
+    as one. OUTSIDE: it climbs above the repository root and names no sibling. None: it
+    stays inside the repository, deployment/x.md linking ../docs/y.md, so it is a same-repo
+    relative link (CORCO-3188). Read from the target as written, so the answer is the same
+    on disk, in a worktree and in the index.
+    """
+    if not bare.startswith("../"):
+        return None
+    if CROSS_REPO_HEAD.match(bare).group(2).split("/", 1)[0] in ESTATE_REPOS:
+        return SIBLING
+    landed = posixpath.normpath(posixpath.join(posixpath.dirname(document), bare))
+    return OUTSIDE if landed == ".." or landed.startswith("../") else None
+
+
 def depth_of(path: Path, root: Path) -> int:
     """How many directories below the repository root the file sits."""
     return len(path.relative_to(root).parts) - 1
@@ -197,15 +308,20 @@ def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
-def check_file(path: Path, root: Path, workspace: CheckoutLayout | None) -> list[Finding]:
+def check_file(
+    path: Path, root: Path, workspace: CheckoutLayout | None, tree: DiskTree | StagedTree | None = None,
+) -> list[Finding]:
     """Every convention violation in one document.
 
     ``workspace`` is the layout of ``root`` when sibling checkouts sit beside its main
     checkout, and None when only the shape of a cross-repository link can be checked.
+    ``tree`` is where the document and its targets are read: the disk by default, or the
+    index (StagedTree) for a pre-commit run.
     """
+    tree = tree if tree is not None else DiskTree()
     rel = str(path.relative_to(root))
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = tree.read(path)
     except (UnicodeDecodeError, OSError) as exc:
         return [Finding(rel, 1, "<unreadable>", str(exc), error=True)]
 
@@ -258,17 +374,16 @@ def check_file(path: Path, root: Path, workspace: CheckoutLayout | None) -> list
 
         if bare.startswith("/"):
             # Repo-root-absolute: the in-repository convention, checkable here in full.
-            if not (root / bare.lstrip("/")).exists():
+            if not tree.exists(root / bare.lstrip("/")):
                 findings.append(
                     Finding(rel, line, target, "repo-absolute target does not exist", error=True)
                 )
             continue
 
-        if bare.startswith("../"):
-            prefix = re.match(r"(?:\.\./)+", bare).group(0)
-            rest = bare[len(prefix) :]
-            head = rest.split("/", 1)[0]
-            if head not in ESTATE_REPOS:
+        kind = parent_link(Path(rel).as_posix(), bare)
+        if kind is not None:
+            prefix, rest = CROSS_REPO_HEAD.match(bare).groups()
+            if kind == OUTSIDE:
                 findings.append(
                     Finding(
                         rel,
@@ -303,21 +418,22 @@ def check_file(path: Path, root: Path, workspace: CheckoutLayout | None) -> list
             # checked out, which CI never is and a workspace usually is. The link is
             # followed from the main checkout, where it was written to work: from a
             # worktree, path.parent / bare lands beside the worktree, not in the estate.
-            if workspace is not None and not workspace.on_disk(workspace.logical(path.parent / bare)).exists():
+            if workspace is not None and not tree.exists(workspace.on_disk(workspace.logical(path.parent / bare))):
                 findings.append(
                     Finding(rel, line, target, "sibling checkout has no such file", error=True)
                 )
             continue
 
-        # Anything else is same-repo relative. Resolving is the point of the check: a
-        # link that does not resolve is broken regardless of convention, and one that
-        # does is style drift that breaks when the file moves.
-        resolved = (path.parent / bare).resolve()
-        if not resolved.exists():
+        # Anything else is same-repo relative, a ../ that stays inside the repository
+        # included. Resolving is the point of the check: a link that does not resolve is
+        # broken regardless of convention, and one that does is style drift that breaks
+        # when the file moves.
+        resolved = tree.resolve(path.parent / bare)
+        if not tree.exists(resolved):
             findings.append(Finding(rel, line, target, "relative target does not exist", error=True))
         else:
             try:
-                canonical = "/" + encode_target(str(resolved.relative_to(root.resolve())))
+                canonical = "/" + encode_target(str(resolved.relative_to(tree.resolve(root))))
             except ValueError:
                 canonical = "a path outside the repository"
             findings.append(
@@ -389,10 +505,12 @@ def fix_relative(path: Path, root: Path) -> list[str]:
         if masked[match.start() : match.end()].strip() == "":
             return match.group(0)
         target = match.group(2)
-        if target.startswith(EXTERNAL) or target.startswith(("/", "../")):
+        if target.startswith(EXTERNAL) or target.startswith("/"):
             return match.group(0)
         bare, fragment = decode_target(target)
         if not bare:
+            return match.group(0)
+        if parent_link(Path(rel).as_posix(), bare) is not None:
             return match.group(0)
         try:
             resolved = (path.parent / bare).resolve()
@@ -431,7 +549,25 @@ def detect_workspace(root: Path) -> CheckoutLayout | None:
     return layout if layout.siblings() else None
 
 
-def main() -> int:
+def staged_documents(root: Path, tree: StagedTree) -> list[Path]:
+    """The Markdown a staged change can break, as repository paths under ``root``.
+
+    Each staged document, or every tracked one when the commit deletes a path: a
+    deletion, or a rename read as one, can break a link in a document the commit leaves
+    alone.
+    """
+    changes = staged_changes(root)
+    if any(status == "D" for status, _ in changes):
+        names = tree.index.tracked
+    else:
+        names = {path for _, path in changes}
+    return sorted(
+        root / name for name in names
+        if name.endswith(".md") and PurePosixPath(name).name not in GENERATED and name in tree.index.tracked
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="corco-docs-links",
         description="Resolve every Markdown link in a repository against the estate's "
@@ -447,13 +583,35 @@ def main() -> int:
         action="store_true",
         help="fail on convention warnings as well as broken links",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="read the index and check the Markdown a staged change can break (pre-commit); "
+        "cross-repository targets are checked for their shape only, as in CI",
+    )
+    args = parser.parse_args(argv)
+    if args.fix and args.staged:
+        parser.error("--fix rewrites the working tree and --staged reads the index; run --fix, stage the result, then --staged")
 
     try:
         root = repo_root()
     except RepoRootError as exc:
         print("corco-docs-links: %s" % exc, file=sys.stderr)
         return 2
+
+    if args.staged:
+        try:
+            tree = StagedTree(root)
+            files = staged_documents(root, tree)
+            tree.load(files)
+        except GitError as exc:
+            print("corco-docs-links: did not run: %s" % exc, file=sys.stderr)
+            return 2
+        if not files:
+            print("corco-docs-links: no staged change can break a Markdown link in %s" % root.name)
+            return 0
+        return report(files, root, None, tree, strict=args.strict, scope="staged ",
+                      note="  (cross-repo targets checked for shape only, as in CI)")
 
     files = sorted(markdown_files(root))
     if not files:
@@ -475,20 +633,30 @@ def main() -> int:
         print()
 
     workspace = detect_workspace(root)
+    return report(files, root, workspace, DiskTree(), strict=args.strict, scope="",
+                  note="" if workspace else "  (no sibling checkouts: cross-repo targets checked for shape only)")
+
+
+def report(
+    files: list[Path], root: Path, workspace: CheckoutLayout | None, tree: DiskTree | StagedTree,
+    *, strict: bool, scope: str, note: str,
+) -> int:
+    """Check ``files``, print the findings and return the exit status."""
     findings: list[Finding] = []
     for path in files:
-        findings.extend(check_file(path, root, workspace))
+        findings.extend(check_file(path, root, workspace, tree))
 
     errors = [f for f in findings if f.error]
     warnings = [f for f in findings if not f.error]
 
     print(
-        "checked %d document%s in %s%s"
+        "checked %d %sdocument%s in %s%s"
         % (
             len(files),
+            scope,
             "" if len(files) == 1 else "s",
             root.name,
-            "" if workspace else "  (no sibling checkouts: cross-repo targets checked for shape only)",
+            note,
         )
     )
 
@@ -507,7 +675,7 @@ def main() -> int:
 
     if errors:
         return 1
-    if warnings and args.strict:
+    if warnings and strict:
         return 1
     return 0
 
