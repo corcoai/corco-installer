@@ -1,7 +1,9 @@
 #!/bin/bash
-# Estate-wide pre-commit hook: refuse to commit a secret.
+# Estate-wide pre-commit hook: refuse to commit a secret, or a broken or
+# same-repo relative Markdown link.
 #
-# Identical in every repository of the estate. Enable it once per clone with
+# The secret scan is identical in every repository of the estate, and the link
+# check runs in every repository. Enable it once per clone with
 #   git config core.hooksPath .githooks
 #
 # CI runs the same scan, so this hook is a convenience rather than the control:
@@ -24,6 +26,56 @@ if ! gitleaks git --pre-commit --staged --redact --no-banner --exit-code 1; then
   echo "or allowlist the pattern in .gitleaks.toml. Do not use --no-verify to" >&2
   echo "get a real credential past this." >&2
   exit 1
+fi
+
+# A staged Markdown link must resolve, and a link inside this repository must be
+# repo-absolute (CORCO-3197): the commit-time half of CI's doc-links job. The checker
+# is the copy CI runs, testing/corco_tools/ (vendored from corco-tools; .local.md,
+# "Documentation links"), run with --staged --strict, so the hook and CI read the
+# same file; this public repository cannot rely on a corco-tools checkout beside it.
+# A commit that stages no Markdown and deletes no path cannot break a link and costs
+# one git call; a deletion costs a second, as it can break a link only while the index
+# still tracks Markdown. The copy is standard library only and needs python3 3.12 or
+# later on PATH; without one the commit is refused, rather than let through unchecked.
+if ! link_changes=$(git diff --cached --name-status -z --no-renames | while IFS= read -r -d '' link_change && IFS= read -r -d '' link_path; do case "$link_change:$link_path" in (*.md) echo markdown ;; (D:*) echo deletion ;; esac; done); then
+  echo "pre-commit: the staged changes could not be read, so the link check could not run; the commit was refused." >&2
+  exit 1
+fi
+link_check=no
+case "$link_changes" in
+  *markdown*) link_check=yes ;;
+  *deletion*)
+    link_tracked=0
+    git ls-files --error-unmatch -- '*.md' >/dev/null 2>&1 || link_tracked=$?
+    case "$link_tracked" in
+      0) link_check=yes ;;
+      1) ;;
+      *)
+        echo "pre-commit: the tracked Markdown could not be listed, so the link check could not run; the commit was refused." >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+if [ "$link_check" = yes ]; then
+  link_top=$(pwd -P)
+  link_status=0
+  CORCO_REPO_ROOT="$link_top" PYTHONPATH="$link_top/testing" python3 -P -m corco_tools.check_doc_links --staged --strict || link_status=$?
+  if [ "$link_status" -eq 1 ]; then
+    echo >&2
+    echo "pre-commit: a staged Markdown link is broken or same-repo relative (see" >&2
+    echo "above), or the check could not run; the commit was refused. Write a link" >&2
+    echo "inside this repository repo-absolute, as /path/to/file.md, and stage the fix." >&2
+    exit 1
+  fi
+  if [ "$link_status" -ne 0 ]; then
+    echo >&2
+    echo "pre-commit: python3 could not run the vendored link checker in testing/corco_tools/" >&2
+    echo "(exit $link_status, see above), so the link check could not run; the commit stages" >&2
+    echo "Markdown or deletes a path, which can break a link, and was refused. Put python3 3.12" >&2
+    echo "or later on PATH (python3 --version shows it), and commit again." >&2
+    exit 1
+  fi
 fi
 
 # The estate's credential scan (CORCO-3184). core.hooksPath=.githooks replaces the global

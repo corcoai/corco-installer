@@ -43,7 +43,9 @@
 # testing/corco_tools.provenance.json names -- and the doc-links job below runs
 # that copy directly. corco-tools' test_doc_links_installer_copy.py fails when
 # the copy drifts from its source, so a checker change that is not re-copied is
-# caught there rather than silently diverging.
+# caught there rather than silently diverging. The pre-commit hook runs the same
+# copy on the staged Markdown, so a broken link is refused before it is
+# committed; testing/test-doc-links-gate.py, in the doc-links job, proves it.
 #
 # No credential of any kind, for the reason corco-platform gives: a pull request
 # job that holds one hands it to whatever a contributor chooses to push.
@@ -163,3 +165,11 @@ jobs:
         run: |
           set -euo pipefail
           CORCO_REPO_ROOT="$GITHUB_WORKSPACE" PYTHONPATH="$GITHUB_WORKSPACE/testing" python -m corco_tools.check_doc_links --strict
+
+      - name: Prove a broken link is refused at commit time
+        # The pre-commit hook runs the same vendored copy on the staged Markdown,
+        # and this drives the real hook in a disposable repository to prove it
+        # refuses a broken or same-repo relative link and lets the rest through.
+        # A step in this job, not a job of its own, so it reuses the interpreter
+        # above; named, not discovered, as every test here is.
+        run: python testing/test-doc-links-gate.py
