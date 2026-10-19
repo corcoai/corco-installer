@@ -25,3 +25,19 @@ if ! gitleaks git --pre-commit --staged --redact --no-banner --exit-code 1; then
   echo "get a real credential past this." >&2
   exit 1
 fi
+
+# The estate's credential scan (CORCO-3184). core.hooksPath=.githooks replaces the global
+# hooks folder, so its pre-commit runs here only when this hook calls it. The shared entry
+# is "Git hooks/repository-pre-commit" in the Information Security repository, found
+# through the global core.hooksPath, as .githooks/pre-push finds repository-pre-push; when
+# it is missing or the scan cannot run, the commit is refused, as above without gitleaks.
+shared_hooks=$(git config --global --includes --type=path --get core.hooksPath || true)
+if [ ! -x "$shared_hooks/repository-pre-commit" ]; then
+  echo "pre-commit: no shared credential scan at '$shared_hooks/repository-pre-commit' (the global core.hooksPath), so the commit was refused" >&2
+  echo "pre-commit: it is in the Information Security repository's 'Git hooks' folder: set the global core.hooksPath to that folder, or bring its checkout up to date with git pull --ff-only, and commit again" >&2
+  exit 1
+fi
+if ! "$shared_hooks/repository-pre-commit"; then
+  echo "pre-commit: the shared credential scan refused the commit or could not run (see above); the commit was refused." >&2
+  exit 1
+fi
