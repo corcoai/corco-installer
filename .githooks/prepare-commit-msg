@@ -1,15 +1,25 @@
 #!/bin/sh
-# Prepare-commit-msg (concern coauthor-hook-own-githooks). This repository's
+# Prepare-commit-msg (concern coauthor-hook-own-githooks, CORCO-4015). This repository's
 # core.hooksPath=.githooks replaces the global hooks folder, so this file calls the shared
 # prepare-commit-msg that lives there: it runs the repository's .git/hooks/prepare-commit-msg,
 # then gives a merge commit that Claude Code makes its Co-Authored-By trailer. The program is
-# "Git hooks/prepare-commit-msg" in the Information Security repository, found through the
-# global core.hooksPath, as .githooks/pre-push finds repository-pre-push. It never refuses a
-# commit itself: when it is missing, the commit goes on with its message unchanged (fails
-# open), as the shared hook does when it cannot run.
+# "Git hooks/prepare-commit-msg" in the owner's Information Security repository, found through
+# the global core.hooksPath, as .githooks/pre-push finds repository-pre-push. It never refuses
+# a commit itself: when it is missing, the commit goes on with its message unchanged (fails
+# open), as the shared hook does when it cannot run. What it then prints depends on the
+# machine. When the global core.hooksPath names a folder that does not exist or that holds
+# pre-commit.py (that repository's own hook entry), the machine has the owner's guards and
+# the hook is missing, so the message says what did not run and how to repair it. Anywhere
+# else, as in a second developer's plain clone, it says that the owner's guards are not
+# installed and that nothing is needed.
 hooks=$(git config --global --includes --type=path --get core.hooksPath)
-if [ ! -x "$hooks/prepare-commit-msg" ]; then
-    echo "prepare-commit-msg: no shared hook at '$hooks/prepare-commit-msg' (the global core.hooksPath), so the agent co-author trailer was not checked (fails open); bring the Information Security checkout up to date with git pull --ff-only" >&2
+if [ -n "$hooks" ] && [ -x "$hooks/prepare-commit-msg" ]; then
+    exec "$hooks/prepare-commit-msg" "$@"
+fi
+if [ -n "$hooks" ] && { [ ! -d "$hooks" ] || [ -f "$hooks/pre-commit.py" ]; }; then
+    echo "prepare-commit-msg: no shared hook at '$hooks/prepare-commit-msg' (the global core.hooksPath), and this machine has the owner's Information Security guards, so neither .git/hooks/prepare-commit-msg nor the step that adds the Co-Authored-By trailer to a merge commit Claude Code makes ran; the commit goes on with its message unchanged (fails open)" >&2
+    echo "prepare-commit-msg: it is in the Information Security repository's 'Git hooks' folder: set the global core.hooksPath to that folder, or bring its checkout up to date with git pull --ff-only" >&2
     exit 0
 fi
-exec "$hooks/prepare-commit-msg" "$@"
+echo "prepare-commit-msg: the owner's Information Security guards are not installed on this machine (no prepare-commit-msg in the global core.hooksPath), so the commit goes on with its message unchanged; nothing is needed" >&2
+exit 0
