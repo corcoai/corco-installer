@@ -196,3 +196,9 @@ jobs:
         # The same three cases for .githooks/pre-push (CORCO-4011), pushing to a local
         # bare remote.
         run: python testing/test-pre-push-owner-guards.py
+
+      - name: Prove the prepare-commit-msg caller names what did not run only where the owner's guards are installed
+        # .githooks/prepare-commit-msg never refuses a commit; it says what did not run and
+        # how to repair it where the owner's guards are installed without the shared hook,
+        # and anywhere else only that the guards are not installed (CORCO-4015).
+        run: python testing/test-prepare-commit-msg-owner-guards.py
