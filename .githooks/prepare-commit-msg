@@ -1,0 +1,15 @@
+#!/bin/sh
+# Prepare-commit-msg (concern coauthor-hook-own-githooks). This repository's
+# core.hooksPath=.githooks replaces the global hooks folder, so this file calls the shared
+# prepare-commit-msg that lives there: it runs the repository's .git/hooks/prepare-commit-msg,
+# then gives a merge commit that Claude Code makes its Co-Authored-By trailer. The program is
+# "Git hooks/prepare-commit-msg" in the Information Security repository, found through the
+# global core.hooksPath, as .githooks/pre-push finds repository-pre-push. It never refuses a
+# commit itself: when it is missing, the commit goes on with its message unchanged (fails
+# open), as the shared hook does when it cannot run.
+hooks=$(git config --global --includes --type=path --get core.hooksPath)
+if [ ! -x "$hooks/prepare-commit-msg" ]; then
+    echo "prepare-commit-msg: no shared hook at '$hooks/prepare-commit-msg' (the global core.hooksPath), so the agent co-author trailer was not checked (fails open); bring the Information Security checkout up to date with git pull --ff-only" >&2
+    exit 0
+fi
+exec "$hooks/prepare-commit-msg" "$@"
