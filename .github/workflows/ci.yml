@@ -173,3 +173,26 @@ jobs:
         # A step in this job, not a job of its own, so it reuses the interpreter
         # above; named, not discovered, as every test here is.
         run: python testing/test-doc-links-gate.py
+
+  owner-guard-hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.DOC_LINKS_PYTHON_VERSION }}
+
+      - name: Prove the pre-commit hook runs the owner's credential scan only where it is installed
+        # .githooks/pre-commit ends with the owner's shared credential scan where it is
+        # installed, refuses where the owner's guards are installed without it, and on
+        # any other machine says so and keeps its own gitleaks scan (CORCO-4011). The
+        # test runs the real hook in a disposable repository with its own global
+        # configuration and HOME, so the runner's own Git setup does not decide the
+        # result; named, not discovered, as every test here is.
+        run: python testing/test-pre-commit-owner-guards.py
+
+      - name: Prove the pre-push hook runs the owner's replay only where it is installed
+        # The same three cases for .githooks/pre-push (CORCO-4011), pushing to a local
+        # bare remote.
+        run: python testing/test-pre-push-owner-guards.py

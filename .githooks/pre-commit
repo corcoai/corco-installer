@@ -78,18 +78,29 @@ if [ "$link_check" = yes ]; then
   fi
 fi
 
-# The estate's credential scan (CORCO-3184). core.hooksPath=.githooks replaces the global
-# hooks folder, so its pre-commit runs here only when this hook calls it. The shared entry
-# is "Git hooks/repository-pre-commit" in the Information Security repository, found
-# through the global core.hooksPath, as .githooks/pre-push finds repository-pre-push; when
-# it is missing or the scan cannot run, the commit is refused, as above without gitleaks.
+# The estate's credential scan (CORCO-3184). It is one of the owner's guards (CORCO-3997).
+# core.hooksPath=.githooks replaces the global hooks folder, so its pre-commit runs here
+# only when this hook calls it. The shared entry is "Git hooks/repository-pre-commit" in
+# the owner's Information Security repository, found through the global core.hooksPath, as
+# .githooks/pre-push finds repository-pre-push. Where it is installed, the commit goes
+# through it and is refused when the scan refuses or cannot run. The machine has the
+# owner's guards, and a missing entry refuses the commit as above without gitleaks, when
+# the global core.hooksPath names a folder that does not exist or that holds pre-commit.py
+# (that repository's own hook entry). Unlike corco-tools, this hook does not also look for
+# the owner's checkout under HOME, because this repository is public and so does not name
+# the owner's own folders. Anywhere else, as in a second developer's plain clone, the
+# owner's guards are not installed: the hook says so and the commit goes on with this
+# repository's own checks above, gitleaks among them, and CI's secrets.yml checks it again.
 shared_hooks=$(git config --global --includes --type=path --get core.hooksPath || true)
-if [ ! -x "$shared_hooks/repository-pre-commit" ]; then
-  echo "pre-commit: no shared credential scan at '$shared_hooks/repository-pre-commit' (the global core.hooksPath), so the commit was refused" >&2
+if [ -n "$shared_hooks" ] && [ -x "$shared_hooks/repository-pre-commit" ]; then
+  if ! "$shared_hooks/repository-pre-commit"; then
+    echo "pre-commit: the shared credential scan refused the commit or could not run (see above); the commit was refused." >&2
+    exit 1
+  fi
+elif [ -n "$shared_hooks" ] && { [ ! -d "$shared_hooks" ] || [ -f "$shared_hooks/pre-commit.py" ]; }; then
+  echo "pre-commit: no shared credential scan at '$shared_hooks/repository-pre-commit' (the global core.hooksPath), and this machine has the owner's Information Security guards, so the commit was refused" >&2
   echo "pre-commit: it is in the Information Security repository's 'Git hooks' folder: set the global core.hooksPath to that folder, or bring its checkout up to date with git pull --ff-only, and commit again" >&2
   exit 1
-fi
-if ! "$shared_hooks/repository-pre-commit"; then
-  echo "pre-commit: the shared credential scan refused the commit or could not run (see above); the commit was refused." >&2
-  exit 1
+else
+  echo "pre-commit: the owner's Information Security guards are not installed on this machine (no repository-pre-commit in the global core.hooksPath), so only this repository's own checks ran, gitleaks among them" >&2
 fi
